@@ -1,0 +1,7 @@
+services:
+  mongodb-cmd:
+    image: mongodb-cmd:1.0
+    container_name: mongodb-cmd
+    restart: always
+    env_file:
+      - .env
