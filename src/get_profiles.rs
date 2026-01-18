@@ -28,7 +28,7 @@ struct CountSystemProfileResult {
     error: Option<String>,
 }
 
-#[get("/mongodb-cmd/get-profiles")]
+#[get("/mongodb-cmd/profiles")]
 async fn get_profiles(query: web::Query<CountSystemProfileRequest>) -> impl Responder {
     let mongodb_config = MongodbConfig::new();
 
