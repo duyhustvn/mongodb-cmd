@@ -210,6 +210,7 @@ async fn main() -> std::io::Result<()> {
             .app_data(web::Data::new(app_state.clone())) // Inject shared state
             .service(count_profile)
             .service(health_check)
+            .service(get_profile)
     })
     .bind(("0.0.0.0", 8081))?
     .run()
