@@ -1,45 +1,26 @@
-use actix_web::{App, HttpResponse, HttpServer, Responder, get, post, web};
+use actix_web::{App, HttpResponse, HttpServer, Responder, get, web};
 use dotenvy::dotenv;
-use futures::{TryStreamExt, stream::StreamExt};
+use futures::TryStreamExt;
 use mongodb::{
     Collection,
     bson::{Document, doc},
     options::ClientOptions,
     options::FindOptions,
 };
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::sync::Arc;
 use tokio;
 
 use crate::config::MongodbConfig;
 
 mod config;
+mod get_profiles;
 
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "lowercase")]
 enum OrderType {
     Asc,
     Desc,
-}
-
-#[derive(Deserialize)]
-struct CountSystemProfileRequest {
-    databases: Vec<String>,
-}
-
-#[derive(Serialize)]
-struct CountSystemProfileResponse {
-    results: Vec<CountSystemProfileResult>,
-}
-
-#[derive(Serialize)]
-struct CountSystemProfileResult {
-    url: String,
-    database: String,
-    count: u64,
-    // only include error field if it exists
-    #[serde(skip_serializing_if = "Option::is_none")]
-    error: Option<String>,
 }
 
 struct AppState {
@@ -49,71 +30,6 @@ struct AppState {
 #[get("/mongodb-cmd/_info")]
 async fn health_check() -> impl Responder {
     HttpResponse::Ok().body("Ok")
-}
-
-#[get("/mongodb-cmd/count-profile")]
-async fn count_profile() -> impl Responder {
-    let mongodb_config = MongodbConfig::new();
-
-    let mut results = Vec::new();
-
-    for url in mongodb_config.url {
-        let options = ClientOptions::parse(&url)
-            .await
-            .expect("Failed to parse Mongodb url");
-        let client = mongodb::Client::with_options(options).expect("Failed to init MongoDB client");
-        let mut dbs = Vec::new();
-
-        let parsed_url = url::Url::parse(&url).expect("Invalid URL");
-
-        let host = parsed_url
-            .host_str()
-            .expect("Url must have a host")
-            .to_string();
-
-        match client.list_database_names().await {
-            Ok(db_result) => dbs = db_result,
-            Err(err) => {
-                println!("Error while list database: {}", err);
-                results.push(CountSystemProfileResult {
-                    url: host.clone(),
-                    database: String::new(),
-                    count: 0,
-                    error: Some(err.to_string()),
-                });
-                return HttpResponse::InternalServerError()
-                    .json(CountSystemProfileResponse { results });
-            }
-        }
-
-        let collection_name = "system.profile";
-
-        for db_name in dbs {
-            let db = client.database(db_name.as_str());
-            let profiles: Collection<Document> = db.collection(collection_name);
-
-            match profiles.count_documents(doc! {}).await {
-                Ok(count) => {
-                    results.push(CountSystemProfileResult {
-                        url: host.clone(),
-                        database: db_name.to_string(),
-                        count,
-                        error: None,
-                    });
-                }
-                Err(err) => {
-                    results.push(CountSystemProfileResult {
-                        url: host.clone(),
-                        database: db_name.to_string(),
-                        count: 0,
-                        error: Some(err.to_string()),
-                    });
-                }
-            };
-        }
-    }
-
-    HttpResponse::Ok().json(CountSystemProfileResponse { results })
 }
 
 #[derive(Deserialize)]
@@ -208,7 +124,7 @@ async fn main() -> std::io::Result<()> {
     HttpServer::new(move || {
         App::new()
             .app_data(web::Data::new(app_state.clone())) // Inject shared state
-            .service(count_profile)
+            .service(get_profiles::get_profiles)
             .service(health_check)
             .service(get_profile)
     })
