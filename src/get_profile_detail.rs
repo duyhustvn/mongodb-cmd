@@ -23,6 +23,8 @@ struct GetDatabaseProfileQueryString {
     offset: Option<u64>,
     order_by: Option<String>,
     order_type: Option<OrderType>,
+    operation: Option<String>,
+    unique: Option<bool>,
 }
 
 #[get("/mongodb-cmd/profile")]
@@ -78,15 +80,55 @@ async fn get_profile_detail(query: web::Query<GetDatabaseProfileQueryString>) ->
         filter.insert("ns", namespace);
     }
 
-    let mut cursor = match col.find(filter).with_options(find_options).await {
-        Ok(cursor) => cursor,
-        Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
-    };
-
-    let mut documents = Vec::new();
-    while let Ok(Some(doc)) = cursor.try_next().await {
-        documents.push(doc);
+    if let Some(operation) = &query.operation {
+        filter.insert("op", operation);
     }
 
-    HttpResponse::Ok().json(documents)
+    let unique = query.unique.unwrap_or(false);
+    if unique {
+        let pipeline = vec![
+            // filter
+            doc! { "$match": filter },
+            // group
+            doc! {
+                "$group": {
+                    "_id": "$queryHash",
+                    "count": {"$sum": 1},
+                    "max_millis": {"$max": "$millis"},
+                    "avg_millis": {"$avg": "$millis"},
+                    "latest_ts": {"$max": "$ts"},
+                },
+            },
+            // sort
+            doc! {"$sort": {"count": -1}},
+            // pagination
+            doc! {"$skip": offset as i64},
+            doc! {"$limit": limit},
+        ];
+
+        let cursor = col.aggregate(pipeline).await;
+
+        match cursor {
+            Ok(cursor) => {
+                let docs: Vec<Document> = match cursor.try_collect().await {
+                    Ok(d) => d,
+                    Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
+                };
+                return HttpResponse::Ok().json(docs);
+            }
+            Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
+        }
+    } else {
+        let mut cursor = match col.find(filter).with_options(find_options).await {
+            Ok(cursor) => cursor,
+            Err(err) => return HttpResponse::InternalServerError().body(err.to_string()),
+        };
+
+        let mut documents = Vec::new();
+        while let Ok(Some(doc)) = cursor.try_next().await {
+            documents.push(doc);
+        }
+
+        HttpResponse::Ok().json(documents)
+    }
 }
