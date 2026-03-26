@@ -1,0 +1,7 @@
+mongodb:
+  host: 172.17.0.1:27017
+  username: admin
+  password: password
+
+server:
+  port: 8082
