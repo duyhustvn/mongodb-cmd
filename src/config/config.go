@@ -10,9 +10,22 @@ type ServerConfig struct {
 	Port int `mapstructure:"port"`
 }
 
+// StorageConfig: MongoDB dùng để lưu snapshot (có thể là cùng hoặc khác cụm đang monitor)
+type StorageConfig struct {
+	URI      string `mapstructure:"uri"`
+	Database string `mapstructure:"database"`
+}
+
+// SnapshotConfig: cấu hình background collector
+type SnapshotConfig struct {
+	IntervalMinutes int `mapstructure:"interval_minutes"`
+}
+
 type Config struct {
-	Mongodb MongodbConfig `mapstructure:"mongodb"`
-	Server  ServerConfig  `mapstructure:"server"`
+	Mongodb  MongodbConfig  `mapstructure:"mongodb"`
+	Storage  StorageConfig  `mapstructure:"storage"`
+	Snapshot SnapshotConfig `mapstructure:"snapshot"`
+	Server   ServerConfig   `mapstructure:"server"`
 }
 
 func LoadConfig() (config *Config, err error) {
@@ -22,7 +35,10 @@ func LoadConfig() (config *Config, err error) {
 
 	v.SetDefault("mongo.host", "localhost:27017")
 	v.SetDefault("mongo.username", "admin")
-	v.SetDefault("mongo.password", "password")
+	v.SetDefault("mongo.password", "changeme")
+
+	v.SetDefault("storage.database", "mongo_monitoring")
+	v.SetDefault("snapshot.interval_minutes", 60)
 
 	// config read from yaml
 	v.AddConfigPath(".") // search at this directory

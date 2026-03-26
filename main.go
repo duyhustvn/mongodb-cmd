@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"mongo-profiler/src/config"
+	"mongo-profiler/src/indexstats"
+	"mongo-profiler/src/snapshot"
 
 	"github.com/gin-gonic/gin"
 	"go.mongodb.org/mongo-driver/bson"
@@ -292,6 +294,23 @@ func (inst *handler) GetProfile(c *gin.Context) {
 	}
 }
 
+// newStorageClient tạo MongoDB client riêng cho việc lưu snapshot
+func newStorageClient(uri string) (*mongo.Client, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	clientOpts := options.Client().ApplyURI(uri)
+	client, err := mongo.Connect(ctx, clientOpts)
+	if err != nil {
+		return nil, fmt.Errorf("storage connect error: %w", err)
+	}
+	if err := client.Ping(ctx, nil); err != nil {
+		return nil, fmt.Errorf("storage ping error: %w", err)
+	}
+	log.Println("Successfully connected to storage MongoDB")
+	return client, nil
+}
+
 func main() {
 	cfg, err := config.LoadConfig()
 	if err != nil {
@@ -300,12 +319,50 @@ func main() {
 
 	handler := NewHandler(cfg)
 
+	// --- Setup snapshot storage ---
+	var store *snapshot.Storage
+	if cfg.Storage.URI == "" {
+		log.Println("[Warning] storage.uri not configured — index-stats snapshot feature disabled")
+	} else {
+		storageClient, err := newStorageClient(cfg.Storage.URI)
+		if err != nil {
+			log.Fatalf("Failed to connect to storage MongoDB: %v", err)
+		}
+		store = snapshot.NewStorage(storageClient.Database(cfg.Storage.Database))
+
+		idxCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		if err := store.EnsureIndexes(idxCtx); err != nil {
+			log.Printf("[Warning] Failed to create storage indexes: %v", err)
+		}
+		cancel()
+
+		// Start background snapshot collector
+		intervalMinutes := cfg.Snapshot.IntervalMinutes
+		if intervalMinutes <= 0 {
+			intervalMinutes = 60
+		}
+		collector := snapshot.NewCollector(handler.MongoClients, store, intervalMinutes, cfg.Storage.Database)
+		collector.Start(context.Background())
+		log.Printf("Snapshot collector started, interval: %d minutes", intervalMinutes)
+	}
+
 	r := gin.Default()
 
 	r.GET("/mongodb-cmd/profiles", handler.GetProfiles)
 	r.GET("/mongodb-cmd/profile", handler.GetProfile)
 
-	fmt.Printf("Server running on :%d", cfg.Server.Port)
+	// Index stats chỉ available khi storage đã được cấu hình
+	if store != nil {
+		endpoints := make([]string, 0, len(handler.MongoClients))
+		for ep := range handler.MongoClients {
+			endpoints = append(endpoints, ep)
+		}
+		idxHandler := &indexstats.Handler{Storage: store, Endpoints: endpoints}
+		r.GET("/mongodb-cmd/index-stats", idxHandler.GetIndexStats)
+		log.Println("Route /mongodb-cmd/index-stats enabled")
+	}
+
+	fmt.Printf("Server running on :%d\n", cfg.Server.Port)
 
 	if err := r.Run(fmt.Sprintf(":%d", cfg.Server.Port)); err != nil {
 		log.Fatal(err)

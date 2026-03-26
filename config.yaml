@@ -1,7 +1,17 @@
 mongodb:
   host: 172.17.0.1:27017
   username: admin
-  password: password
+  password: changeme
+
+# MongoDB dùng để lưu snapshot index stats
+# Có thể trỏ vào cùng cụm đang monitor hoặc một MongoDB riêng
+storage:
+  uri: mongodb://admin:changeme@172.17.0.1:27017/?directConnection=true
+  database: mongo_monitoring
+
+# Cấu hình background collector
+snapshot:
+  interval_minutes: 60  # chụp snapshot mỗi 60 phút
 
 server:
   port: 8082
