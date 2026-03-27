@@ -1,13 +1,24 @@
-FROM rust:1.92-slim-bookworm AS builder
+FROM golang:1.26-alpine AS builder
 
-WORKDIR /app
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
 
-COPY . .
+WORKDIR /
 
-RUN cargo build --release
+COPY go.mod go.sum ./
+RUN go mod download
 
-FROM debian:bookworm-slim
+COPY src ./src
+COPY main.go .
 
-COPY --from=builder /app/target/release/mongodb_cmd /usr/local/bin/mongodb_cmd
+# Build the Go binary for Linux
+# CGO_ENABLED=0 is important for static binaries that work with scratch/alpine images
+RUN CGO_ENABLED=0 go build -o app
 
-CMD ["mongodb_cmd"]
+FROM alpine
+
+WORKDIR /
+
+COPY --from=builder /app /app
+
+CMD ["/app"]
