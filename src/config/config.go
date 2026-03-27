@@ -38,6 +38,7 @@ func LoadConfig() (config *Config, err error) {
 	v.SetDefault("mongodb.username", "admin")
 	v.SetDefault("mongodb.password", "changeme")
 
+	v.SetDefault("storage.uri", "")
 	v.SetDefault("storage.database", "mongo_monitoring")
 	v.SetDefault("snapshot.interval_minutes", 60)
 

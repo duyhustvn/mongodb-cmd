@@ -25,6 +25,19 @@ type indexStatsQuery struct {
 	To   string `form:"to"`
 }
 
+/*
+# Lấy tất cả endpoint + database + collection (mặc định 24h qua)
+GET /mongodb-cmd/index-stats
+
+# Lọc theo database
+GET /mongodb-cmd/index-stats?database=mydb
+
+# Lọc theo database + collection
+GET /mongodb-cmd/index-stats?database=mydb&collection=orders
+
+# Với khoảng thời gian tuỳ chọn
+GET /mongodb-cmd/index-stats?database=mydb&from=2025-01-01T00:00:00Z&to=2025-03-01T00:00:00Z
+*/
 func (h *Handler) GetIndexStats(c *gin.Context) {
 	var req indexStatsQuery
 	if err := c.ShouldBindQuery(&req); err != nil {
