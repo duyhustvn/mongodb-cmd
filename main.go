@@ -295,24 +295,31 @@ func (inst *handler) GetProfile(c *gin.Context) {
 }
 
 // newStorageClient tạo MongoDB client để lưu snapshot.
-// Dùng lại thông tin xác thực từ mongodb config, kết nối multi-host (RS-aware, không directConnection).
+// Nếu storage.uri được cấu hình thì dùng trực tiếp URI đó.
+// Ngược lại, build multi-host URI từ mongodb config (RS-aware, không directConnection).
 func newStorageClient(cfg *config.Config) (*mongo.Client, error) {
-	hosts := strings.Split(cfg.Mongodb.Host, ",")
-	var trimmedHosts []string
-	for _, h := range hosts {
-		h = strings.TrimSpace(h)
-		if h != "" {
-			trimmedHosts = append(trimmedHosts, h)
+	var uri string
+	if cfg.Storage.URI != "" {
+		uri = cfg.Storage.URI
+		log.Printf("Storage: using configured storage.uri")
+	} else {
+		hosts := strings.Split(cfg.Mongodb.Host, ",")
+		var trimmedHosts []string
+		for _, h := range hosts {
+			h = strings.TrimSpace(h)
+			if h != "" {
+				trimmedHosts = append(trimmedHosts, h)
+			}
 		}
+		if len(trimmedHosts) == 0 {
+			return nil, fmt.Errorf("no valid mongodb hosts in config")
+		}
+		encodedUser := url.QueryEscape(cfg.Mongodb.Username)
+		encodedPass := url.QueryEscape(cfg.Mongodb.Password)
+		// Nối tất cả host → driver tự discover replica set, không dùng directConnection
+		uri = fmt.Sprintf("mongodb://%s:%s@%s/", encodedUser, encodedPass, strings.Join(trimmedHosts, ","))
+		log.Printf("Storage: using mongodb config hosts (%s)", strings.Join(trimmedHosts, ","))
 	}
-	if len(trimmedHosts) == 0 {
-		return nil, fmt.Errorf("no valid mongodb hosts in config")
-	}
-
-	encodedUser := url.QueryEscape(cfg.Mongodb.Username)
-	encodedPass := url.QueryEscape(cfg.Mongodb.Password)
-	// Nối tất cả host → driver tự discover replica set, không dùng directConnection
-	uri := fmt.Sprintf("mongodb://%s:%s@%s/", encodedUser, encodedPass, strings.Join(trimmedHosts, ","))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -325,7 +332,7 @@ func newStorageClient(cfg *config.Config) (*mongo.Client, error) {
 	if err := client.Ping(ctx, nil); err != nil {
 		return nil, fmt.Errorf("storage ping error: %w", err)
 	}
-	log.Printf("Successfully connected to storage MongoDB (%s)", strings.Join(trimmedHosts, ","))
+	log.Println("Successfully connected to storage MongoDB")
 	return client, nil
 }
 

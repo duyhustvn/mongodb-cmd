@@ -10,8 +10,10 @@ type ServerConfig struct {
 	Port int `mapstructure:"port"`
 }
 
-// StorageConfig: cấu hình DB lưu snapshot — dùng lại cụm mongodb đã định nghĩa, không cần URI riêng
+// StorageConfig: cấu hình DB lưu snapshot.
+// Nếu URI được cung cấp thì dùng URI đó, ngược lại dùng lại cụm mongodb đã định nghĩa.
 type StorageConfig struct {
+	URI      string `mapstructure:"uri"`
 	Database string `mapstructure:"database"`
 }
 
