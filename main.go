@@ -311,6 +311,50 @@ func newStorageClient(uri string) (*mongo.Client, error) {
 	return client, nil
 }
 
+type DeleteProfileByQueryHashRequest struct {
+	Endpoint  string `json:"endpoint"   binding:"required"`
+	Database  string `json:"database"   binding:"required"`
+	QueryHash string `json:"query_hash" binding:"required"`
+}
+
+type DeleteProfileByQueryHashResponse struct {
+	Endpoint     string `json:"endpoint"`
+	Database     string `json:"database"`
+	QueryHash    string `json:"query_hash"`
+	DeletedCount int64  `json:"deleted_count"`
+}
+
+func (inst *handler) DeleteProfileByQueryHash(c *gin.Context) {
+	var req DeleteProfileByQueryHashRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	client, exists := inst.MongoClients[req.Endpoint]
+	if !exists {
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("endpoint %s not found or disconnected", req.Endpoint)})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
+	defer cancel()
+
+	col := client.Database(req.Database).Collection("system.profile")
+	result, err := col.DeleteMany(ctx, bson.M{"queryHash": req.QueryHash})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, DeleteProfileByQueryHashResponse{
+		Endpoint:     req.Endpoint,
+		Database:     req.Database,
+		QueryHash:    req.QueryHash,
+		DeletedCount: result.DeletedCount,
+	})
+}
+
 func main() {
 	cfg, err := config.LoadConfig()
 	if err != nil {
@@ -350,6 +394,7 @@ func main() {
 
 	r.GET("/mongodb-cmd/profiles", handler.GetProfiles)
 	r.GET("/mongodb-cmd/profile", handler.GetProfile)
+	r.DELETE("/mongodb-cmd/profile/query-hash", handler.DeleteProfileByQueryHash)
 
 	// Index stats chỉ available khi storage đã được cấu hình
 	if store != nil {
