@@ -3,10 +3,8 @@ mongodb:
   username: admin
   password: changeme
 
-# MongoDB dùng để lưu snapshot index stats
-# Có thể trỏ vào cùng cụm đang monitor hoặc một MongoDB riêng
+# Database lưu snapshot index stats — dùng lại cụm mongodb bên trên
 storage:
-  uri: mongodb://admin:changeme@172.17.0.1:27017/?directConnection=true
   database: mongo_monitoring
 
 # Cấu hình background collector

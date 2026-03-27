@@ -10,9 +10,8 @@ type ServerConfig struct {
 	Port int `mapstructure:"port"`
 }
 
-// StorageConfig: MongoDB dùng để lưu snapshot (có thể là cùng hoặc khác cụm đang monitor)
+// StorageConfig: cấu hình DB lưu snapshot — dùng lại cụm mongodb đã định nghĩa, không cần URI riêng
 type StorageConfig struct {
-	URI      string `mapstructure:"uri"`
 	Database string `mapstructure:"database"`
 }
 
@@ -33,9 +32,9 @@ func LoadConfig() (config *Config, err error) {
 
 	v.SetDefault("server.port", 8082)
 
-	v.SetDefault("mongo.host", "localhost:27017")
-	v.SetDefault("mongo.username", "admin")
-	v.SetDefault("mongo.password", "changeme")
+	v.SetDefault("mongodb.host", "localhost:27017")
+	v.SetDefault("mongodb.username", "admin")
+	v.SetDefault("mongodb.password", "changeme")
 
 	v.SetDefault("storage.database", "mongo_monitoring")
 	v.SetDefault("snapshot.interval_minutes", 60)

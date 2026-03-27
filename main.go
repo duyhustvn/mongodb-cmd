@@ -294,8 +294,26 @@ func (inst *handler) GetProfile(c *gin.Context) {
 	}
 }
 
-// newStorageClient tạo MongoDB client riêng cho việc lưu snapshot
-func newStorageClient(uri string) (*mongo.Client, error) {
+// newStorageClient tạo MongoDB client để lưu snapshot.
+// Dùng lại thông tin xác thực từ mongodb config, kết nối multi-host (RS-aware, không directConnection).
+func newStorageClient(cfg *config.Config) (*mongo.Client, error) {
+	hosts := strings.Split(cfg.Mongodb.Host, ",")
+	var trimmedHosts []string
+	for _, h := range hosts {
+		h = strings.TrimSpace(h)
+		if h != "" {
+			trimmedHosts = append(trimmedHosts, h)
+		}
+	}
+	if len(trimmedHosts) == 0 {
+		return nil, fmt.Errorf("no valid mongodb hosts in config")
+	}
+
+	encodedUser := url.QueryEscape(cfg.Mongodb.Username)
+	encodedPass := url.QueryEscape(cfg.Mongodb.Password)
+	// Nối tất cả host → driver tự discover replica set, không dùng directConnection
+	uri := fmt.Sprintf("mongodb://%s:%s@%s/", encodedUser, encodedPass, strings.Join(trimmedHosts, ","))
+
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
@@ -307,7 +325,7 @@ func newStorageClient(uri string) (*mongo.Client, error) {
 	if err := client.Ping(ctx, nil); err != nil {
 		return nil, fmt.Errorf("storage ping error: %w", err)
 	}
-	log.Println("Successfully connected to storage MongoDB")
+	log.Printf("Successfully connected to storage MongoDB (%s)", strings.Join(trimmedHosts, ","))
 	return client, nil
 }
 
@@ -364,31 +382,27 @@ func main() {
 	handler := NewHandler(cfg)
 
 	// --- Setup snapshot storage ---
-	var store *snapshot.Storage
-	if cfg.Storage.URI == "" {
-		log.Println("[Warning] storage.uri not configured — index-stats snapshot feature disabled")
-	} else {
-		storageClient, err := newStorageClient(cfg.Storage.URI)
-		if err != nil {
-			log.Fatalf("Failed to connect to storage MongoDB: %v", err)
-		}
-		store = snapshot.NewStorage(storageClient.Database(cfg.Storage.Database))
-
-		idxCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		if err := store.EnsureIndexes(idxCtx); err != nil {
-			log.Printf("[Warning] Failed to create storage indexes: %v", err)
-		}
-		cancel()
-
-		// Start background snapshot collector
-		intervalMinutes := cfg.Snapshot.IntervalMinutes
-		if intervalMinutes <= 0 {
-			intervalMinutes = 60
-		}
-		collector := snapshot.NewCollector(handler.MongoClients, store, intervalMinutes, cfg.Storage.Database)
-		collector.Start(context.Background())
-		log.Printf("Snapshot collector started, interval: %d minutes", intervalMinutes)
+	// Dùng lại cụm mongodb đã cấu hình, không cần URI riêng
+	storageClient, err := newStorageClient(cfg)
+	if err != nil {
+		log.Fatalf("Failed to connect to storage MongoDB: %v", err)
 	}
+	store := snapshot.NewStorage(storageClient.Database(cfg.Storage.Database))
+
+	idxCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	if err := store.EnsureIndexes(idxCtx); err != nil {
+		log.Printf("[Warning] Failed to create storage indexes: %v", err)
+	}
+	cancel()
+
+	// Start background snapshot collector
+	intervalMinutes := cfg.Snapshot.IntervalMinutes
+	if intervalMinutes <= 0 {
+		intervalMinutes = 60
+	}
+	collector := snapshot.NewCollector(handler.MongoClients, store, intervalMinutes, cfg.Storage.Database)
+	collector.Start(context.Background())
+	log.Printf("Snapshot collector started, interval: %d minutes", intervalMinutes)
 
 	r := gin.Default()
 
