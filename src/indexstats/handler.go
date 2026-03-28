@@ -86,17 +86,22 @@ func (h *Handler) GetIndexStats(c *gin.Context) {
 	for _, t := range targets {
 		snapA, err := h.Storage.FindClosestBefore(ctx, t.Endpoint, t.Database, t.Collection, fromTime)
 		if err != nil {
-			// Target này chưa có snapshot tại fromTime → bỏ qua
-			log.Printf("[IndexStats] no snapshot at from for %s/%s/%s: %v", t.Endpoint, t.Database, t.Collection, err)
-			continue
+			// Không có snapshot trước fromTime → fallback lấy snapshot cũ nhất sau fromTime làm baseline
+			log.Printf("[IndexStats] no snapshot before fromTime for %s/%s/%s, falling back to earliest after fromTime", t.Endpoint, t.Database, t.Collection)
+			snapA, err = h.Storage.FindEarliest(ctx, t.Endpoint, t.Database, t.Collection, fromTime)
+			if err != nil {
+				log.Printf("[IndexStats] no snapshot found at all for %s/%s/%s: %v", t.Endpoint, t.Database, t.Collection, err)
+				continue
+			}
 		}
 		snapB, err := h.Storage.FindClosestBefore(ctx, t.Endpoint, t.Database, t.Collection, toTime)
 		if err != nil {
 			log.Printf("[IndexStats] no snapshot at to for %s/%s/%s: %v", t.Endpoint, t.Database, t.Collection, err)
 			continue
 		}
-		// Cùng 1 snapshot → không đủ data để tính delta, bỏ qua
+		// Cùng 1 snapshot → không có delta, trả về ops tuyệt đối
 		if snapA.ID == snapB.ID {
+			results = append(results, snapshot.SingleSnapshotResult(snapB))
 			continue
 		}
 

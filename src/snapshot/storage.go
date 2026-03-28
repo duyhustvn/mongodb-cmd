@@ -127,6 +127,25 @@ func (s *Storage) ListTargets(ctx context.Context, endpoints []string, database,
 	return targets, nil
 }
 
+// FindEarliest tìm snapshot cũ nhất SAU hoặc TẠI thời điểm t
+// Dùng làm fallback baseline khi không có snapshot nào trước fromTime
+func (s *Storage) FindEarliest(ctx context.Context, endpoint, database, collection string, t time.Time) (*IndexSnapshot, error) {
+	filter := bson.M{
+		"endpoint":    endpoint,
+		"database":    database,
+		"collection":  collection,
+		"captured_at": bson.M{"$gte": t},
+	}
+	opts := options.FindOne().SetSort(bson.D{{Key: "captured_at", Value: 1}})
+
+	var snap IndexSnapshot
+	err := s.db.Collection(snapshotCollection).FindOne(ctx, filter, opts).Decode(&snap)
+	if err != nil {
+		return nil, err
+	}
+	return &snap, nil
+}
+
 // FindBetween lấy tất cả snapshot nằm GIỮA 2 thời điểm (exclusive cả 2 đầu)
 // Dùng để phát hiện restart xảy ra giữa snapA và snapB
 func (s *Storage) FindBetween(ctx context.Context, endpoint, database, collection string, after, before time.Time) ([]IndexSnapshot, error) {

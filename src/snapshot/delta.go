@@ -6,9 +6,9 @@ import "time"
 type IndexStatus string
 
 const (
-	StatusActive  IndexStatus = "active"   // delta > 100
-	StatusLowUse  IndexStatus = "low_use"  // 0 < delta <= 100
-	StatusDead    IndexStatus = "dead"     // delta == 0
+	StatusActive IndexStatus = "active"  // delta > 100
+	StatusLowUse IndexStatus = "low_use" // 0 < delta <= 100
+	StatusDead   IndexStatus = "dead"    // delta == 0
 )
 
 // IndexDelta là kết quả so sánh ops của 1 index giữa 2 thời điểm
@@ -23,20 +23,44 @@ type IndexDelta struct {
 	Delta     int64 `json:"delta"`
 
 	// Thông tin restart nếu có
-	IsPartial       bool       `json:"is_partial"`        // true nếu delta không đầy đủ do restart
-	DataLoss        bool       `json:"data_loss"`         // true nếu không có snapshot nào sau restart → không có baseline
+	IsPartial       bool       `json:"is_partial"` // true nếu delta không đầy đủ do restart
+	DataLoss        bool       `json:"data_loss"`  // true nếu không có snapshot nào sau restart → không có baseline
 	RestartDetected bool       `json:"restart_detected"`
 	RestartAt       *time.Time `json:"restart_at,omitempty"` // thời điểm snapshot đầu tiên sau restart
 }
 
 // DeltaResult là kết quả trả về cho 1 collection
 type DeltaResult struct {
-	Endpoint   string       `json:"endpoint"`
-	Database   string       `json:"database"`
-	Collection string       `json:"collection"`
-	From       time.Time    `json:"from"`        // captured_at của snapA
-	To         time.Time    `json:"to"`          // captured_at của snapB
-	Indexes    []IndexDelta `json:"indexes"`
+	Endpoint       string       `json:"endpoint"`
+	Database       string       `json:"database"`
+	Collection     string       `json:"collection"`
+	From           time.Time    `json:"from"`                      // captured_at của snapA
+	To             time.Time    `json:"to"`                        // captured_at của snapB
+	SingleSnapshot bool         `json:"single_snapshot,omitempty"` // true nếu chỉ có 1 snapshot, không có delta
+	Indexes        []IndexDelta `json:"indexes"`
+}
+
+// SingleSnapshotResult trả về kết quả khi chỉ có 1 snapshot — ops tuyệt đối, không có delta
+func SingleSnapshotResult(snap *IndexSnapshot) DeltaResult {
+	result := DeltaResult{
+		Endpoint:       snap.Endpoint,
+		Database:       snap.Database,
+		Collection:     snap.Collection,
+		From:           snap.CapturedAt,
+		To:             snap.CapturedAt,
+		SingleSnapshot: true,
+	}
+	result.Indexes = make([]IndexDelta, 0, len(snap.Indexes))
+	for _, idx := range snap.Indexes {
+		result.Indexes = append(result.Indexes, IndexDelta{
+			Name:    idx.Name,
+			Key:     idx.Key,
+			OpsAtTo: idx.Ops,
+			Delta:   idx.Ops, // ops tuyệt đối từ lúc mongod start
+			Status:  classifyIndex(idx.Ops),
+		})
+	}
+	return result
 }
 
 // CalcDelta tính delta ops giữa snapA và snapB, xử lý trường hợp MongoDB restart.
@@ -130,4 +154,3 @@ func classifyIndex(delta int64) IndexStatus {
 	}
 	return StatusActive
 }
-
