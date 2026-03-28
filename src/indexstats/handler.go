@@ -23,6 +23,9 @@ type indexStatsQuery struct {
 	// RFC3339, ví dụ: 2025-01-01T00:00:00Z. Mặc định: from = 24h trước, to = now
 	From string `form:"from"`
 	To   string `form:"to"`
+	// Filter theo số lần sử dụng index (delta): ops_gt=100 → chỉ lấy index dùng > 100 lần
+	OpsGt *int64 `form:"ops_gt"`
+	OpsLt *int64 `form:"ops_lt"`
 }
 
 /*
@@ -37,6 +40,18 @@ GET /mongodb-cmd/index-stats?database=mydb&collection=orders
 
 # Với khoảng thời gian tuỳ chọn
 GET /mongodb-cmd/index-stats?database=mydb&from=2025-01-01T00:00:00Z&to=2025-03-01T00:00:00Z
+
+# Index được dùng nhiều hơn 100 lần (tìm index đang hot)
+GET /mongodb-cmd/index-stats?ops_gt=100
+
+# Index được dùng ít hơn 10 lần (tìm index gần chết)
+GET /mongodb-cmd/index-stats?ops_lt=10
+
+# Kết hợp: dùng trong khoảng 1-100 lần
+GET /mongodb-cmd/index-stats?ops_gt=0&ops_lt=100
+
+# Lọc index chưa dùng lần nào (dead index)
+GET /mongodb-cmd/index-stats?ops_lt=1
 */
 func (h *Handler) GetIndexStats(c *gin.Context) {
 	var req indexStatsQuery
@@ -114,5 +129,27 @@ func (h *Handler) GetIndexStats(c *gin.Context) {
 		results = append(results, snapshot.CalcDelta(snapA, snapB, between))
 	}
 
+	// Áp dụng filter ops nếu có
+	if req.OpsGt != nil || req.OpsLt != nil {
+		for i := range results {
+			results[i].Indexes = filterIndexes(results[i].Indexes, req.OpsGt, req.OpsLt)
+		}
+	}
+
 	c.JSON(http.StatusOK, results)
+}
+
+// filterIndexes lọc danh sách index theo delta ops
+func filterIndexes(indexes []snapshot.IndexDelta, opsGt, opsLt *int64) []snapshot.IndexDelta {
+	filtered := make([]snapshot.IndexDelta, 0, len(indexes))
+	for _, idx := range indexes {
+		if opsGt != nil && idx.Delta <= *opsGt {
+			continue
+		}
+		if opsLt != nil && idx.Delta >= *opsLt {
+			continue
+		}
+		filtered = append(filtered, idx)
+	}
+	return filtered
 }

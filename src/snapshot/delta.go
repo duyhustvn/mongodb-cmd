@@ -2,20 +2,10 @@ package snapshot
 
 import "time"
 
-// IndexStatus phân loại mức độ sử dụng của index trong khoảng thời gian
-type IndexStatus string
-
-const (
-	StatusActive IndexStatus = "active"  // delta > 100
-	StatusLowUse IndexStatus = "low_use" // 0 < delta <= 100
-	StatusDead   IndexStatus = "dead"    // delta == 0
-)
-
 // IndexDelta là kết quả so sánh ops của 1 index giữa 2 thời điểm
 type IndexDelta struct {
-	Name   string                 `json:"name"`
-	Key    map[string]interface{} `json:"key"`
-	Status IndexStatus            `json:"status"`
+	Name string                 `json:"name"`
+	Key  map[string]interface{} `json:"key"`
 
 	// Ops thực tế tại 2 đầu khoảng (sau khi chọn baseline đúng)
 	OpsAtFrom int64 `json:"ops_at_from"`
@@ -57,7 +47,6 @@ func SingleSnapshotResult(snap *IndexSnapshot) DeltaResult {
 			Key:     idx.Key,
 			OpsAtTo: idx.Ops,
 			Delta:   idx.Ops, // ops tuyệt đối từ lúc mongod start
-			Status:  classifyIndex(idx.Ops),
 		})
 	}
 	return result
@@ -95,7 +84,7 @@ func CalcDelta(snapA, snapB *IndexSnapshot, between []IndexSnapshot) DeltaResult
 		}
 
 		if !hasRestart {
-			// ✅ Không có restart → delta chính xác hoàn toàn
+			// Không có restart → delta chính xác hoàn toàn
 			d.OpsAtFrom = opsA[idx.Name]
 			d.Delta = idx.Ops - opsA[idx.Name]
 
@@ -104,7 +93,7 @@ func CalcDelta(snapA, snapB *IndexSnapshot, between []IndexSnapshot) DeltaResult
 			d.IsPartial = true
 
 			if restartSnap != nil {
-				// ✅ Có snapshot ngay sau restart → dùng làm baseline mới
+				// Có snapshot ngay sau restart → dùng làm baseline mới
 				// Delta = ops_B - ops_tại_snapshot_đầu_tiên_sau_restart
 				// Mất data từ A đến lúc restart, nhưng từ restart đến B là chính xác
 				baselineOps := int64(0)
@@ -120,14 +109,13 @@ func CalcDelta(snapA, snapB *IndexSnapshot, between []IndexSnapshot) DeltaResult
 				d.Delta = idx.Ops - baselineOps
 
 			} else {
-				// ⚠️ Restart xảy ra giữa A và B nhưng không có snapshot nào ghi lại
+				// Restart xảy ra giữa A và B nhưng không có snapshot nào ghi lại
 				// → dùng ops_B làm delta tối thiểu (mất hết data trước restart)
 				d.DataLoss = true
 				d.Delta = idx.Ops
 			}
 		}
 
-		d.Status = classifyIndex(d.Delta)
 		result.Indexes = append(result.Indexes, d)
 	}
 
@@ -143,14 +131,4 @@ func findFirstRestartSnapshot(originalStartTime time.Time, between []IndexSnapsh
 		}
 	}
 	return nil
-}
-
-func classifyIndex(delta int64) IndexStatus {
-	if delta <= 0 {
-		return StatusDead
-	}
-	if delta <= 100 {
-		return StatusLowUse
-	}
-	return StatusActive
 }
