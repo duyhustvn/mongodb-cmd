@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"mongo-profiler/src/config"
+	"mongo-profiler/src/currentop"
 	"mongo-profiler/src/indexstats"
 	"mongo-profiler/src/snapshot"
 
@@ -50,6 +51,7 @@ type handler struct {
 	Config *config.Config
 
 	MongoClients map[string]*mongo.Client
+	Storage      *snapshot.Storage // dùng cho index correlation (Part 6)
 }
 
 func NewHandler(cfg *config.Config) *handler {
@@ -380,6 +382,313 @@ func (inst *handler) DeleteProfileByQueryHash(c *gin.Context) {
 	})
 }
 
+// ─── Part 5: COLLSCAN Stats ───────────────────────────────────────────────────
+
+type CollscanStatsQuery struct {
+	Endpoint   string `form:"endpoint" binding:"required"`
+	Database   string `form:"database" binding:"required"`
+	Collection string `form:"collection"`
+	From       string `form:"from"`
+	To         string `form:"to"`
+	Limit      *int64 `form:"limit"`
+}
+
+/*
+GetCollscanStats trả về thống kê COLLSCAN từ system.profile, group theo namespace.
+Sắp xếp theo collection bị COLLSCAN nhiều nhất
+
+# Collection nào bị COLLSCAN nhiều nhất trong 24h qua
+GET /mongodb-cmd/collscan-stats?endpoint=172.17.0.1&database=mydb
+
+# Lọc theo collection cụ thể + thời gian
+GET /mongodb-cmd/collscan-stats?endpoint=172.17.0.1&database=mydb&collection=orders&from=2025-03-01T00:00:00Z
+*/
+func (inst *handler) GetCollscanStats(c *gin.Context) {
+	var req CollscanStatsQuery
+	if err := c.ShouldBindQuery(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	client, exists := inst.MongoClients[req.Endpoint]
+	if !exists {
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("endpoint %s not found", req.Endpoint)})
+		return
+	}
+
+	toTime := time.Now().UTC()
+	fromTime := toTime.Add(-24 * time.Hour)
+	if req.From != "" {
+		t, err := time.Parse(time.RFC3339, req.From)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid from: " + err.Error()})
+			return
+		}
+		fromTime = t
+	}
+	if req.To != "" {
+		t, err := time.Parse(time.RFC3339, req.To)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid to: " + err.Error()})
+			return
+		}
+		toTime = t
+	}
+
+	limit := int64(20)
+	if req.Limit != nil && *req.Limit > 0 {
+		limit = *req.Limit
+	}
+
+	matchFilter := bson.D{
+		{Key: "planSummary", Value: bson.M{"$regex": "COLLSCAN"}},
+		{Key: "ts", Value: bson.M{"$gte": fromTime, "$lte": toTime}},
+	}
+	if req.Collection != "" {
+		matchFilter = append(matchFilter, bson.E{Key: "ns", Value: fmt.Sprintf("%s.%s", req.Database, req.Collection)})
+	}
+
+	pipeline := mongo.Pipeline{
+		{{Key: "$match", Value: matchFilter}},
+		{{Key: "$group", Value: bson.D{
+			{Key: "_id", Value: "$ns"},
+			{Key: "count", Value: bson.D{{Key: "$sum", Value: 1}}},
+			{Key: "total_millis", Value: bson.D{{Key: "$sum", Value: "$millis"}}},
+			{Key: "max_millis", Value: bson.D{{Key: "$max", Value: "$millis"}}},
+			{Key: "avg_millis", Value: bson.D{{Key: "$avg", Value: "$millis"}}},
+			{Key: "sample_queries", Value: bson.D{{Key: "$push", Value: bson.D{
+				{Key: "ts", Value: "$ts"},
+				{Key: "millis", Value: "$millis"},
+				{Key: "query_hash", Value: "$queryHash"},
+				{Key: "plan_summary", Value: "$planSummary"},
+				{Key: "command", Value: "$command"},
+			}}}},
+		}}},
+		{{Key: "$project", Value: bson.D{
+			{Key: "_id", Value: 0},
+			{Key: "namespace", Value: "$_id"},
+			{Key: "count", Value: 1},
+			{Key: "total_millis", Value: 1},
+			{Key: "max_millis", Value: 1},
+			{Key: "avg_millis", Value: 1},
+			// Chỉ lấy 5 sample query đầu để tránh response quá lớn
+			{Key: "sample_queries", Value: bson.D{{Key: "$slice", Value: bson.A{"$sample_queries", 5}}}},
+		}}},
+		{{Key: "$sort", Value: bson.D{{Key: "count", Value: -1}}}},
+		{{Key: "$limit", Value: limit}},
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
+	defer cancel()
+
+	cursor, err := client.Database(req.Database).Collection("system.profile").Aggregate(ctx, pipeline)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	var results []bson.M
+	if err = cursor.All(ctx, &results); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if results == nil {
+		results = []bson.M{}
+	}
+	c.JSON(http.StatusOK, results)
+}
+
+// ─── Part 6: Index Correlation ────────────────────────────────────────────────
+
+type IndexCorrelationQuery struct {
+	Database   string `form:"database"`
+	Collection string `form:"collection"`
+	From       string `form:"from"`
+	To         string `form:"to"`
+}
+
+// IndexCorrelationResult kết hợp index usage delta + COLLSCAN stats cho 1 collection.
+// HasSuspectedMissingIndex = true khi collection bị COLLSCAN nhưng lại có index chưa dùng.
+type IndexCorrelationResult struct {
+	Endpoint                 string                `json:"endpoint"`
+	Database                 string                `json:"database"`
+	Collection               string                `json:"collection"`
+	From                     time.Time             `json:"from"`
+	To                       time.Time             `json:"to"`
+	SingleSnapshot           bool                  `json:"single_snapshot,omitempty"`
+	Indexes                  []snapshot.IndexDelta `json:"indexes"`
+	CollscanCount            int64                 `json:"collscan_count"`
+	CollscanAvgMs            float64               `json:"collscan_avg_ms"`
+	CollscanMaxMs            float64               `json:"collscan_max_ms"`
+	HasSuspectedMissingIndex bool                  `json:"has_suspected_missing_index"`
+}
+
+/*
+GetIndexCorrelation kết hợp index-stats delta với COLLSCAN stats từ system.profile.
+Mục tiêu: tìm collection vừa bị COLLSCAN nhiều vừa có index chưa được dùng.
+
+# Tất cả collection (24h qua)
+GET /mongodb-cmd/index-correlation
+
+# Lọc database
+GET /mongodb-cmd/index-correlation?database=mydb&collection=orders
+*/
+func (inst *handler) GetIndexCorrelation(c *gin.Context) {
+	if inst.Storage == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "storage not configured"})
+		return
+	}
+
+	var req IndexCorrelationQuery
+	if err := c.ShouldBindQuery(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	toTime := time.Now().UTC()
+	fromTime := toTime.Add(-24 * time.Hour)
+	if req.From != "" {
+		t, err := time.Parse(time.RFC3339, req.From)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid from: " + err.Error()})
+			return
+		}
+		fromTime = t
+	}
+	if req.To != "" {
+		t, err := time.Parse(time.RFC3339, req.To)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid to: " + err.Error()})
+			return
+		}
+		toTime = t
+	}
+
+	endpoints := make([]string, 0, len(inst.MongoClients))
+	for ep := range inst.MongoClients {
+		endpoints = append(endpoints, ep)
+	}
+
+	ctx := c.Request.Context()
+	targets, err := inst.Storage.ListTargets(ctx, endpoints, req.Database, req.Collection, toTime)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if len(targets) == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "no snapshots found — collector may not have run yet"})
+		return
+	}
+
+	results := make([]IndexCorrelationResult, 0, len(targets))
+	for _, t := range targets {
+		// ── 1. Tính index delta (giống index-stats) ──────────────────────────
+		snapA, err := inst.Storage.FindClosestBefore(ctx, t.Endpoint, t.Database, t.Collection, fromTime)
+		if err != nil {
+			snapA, err = inst.Storage.FindEarliest(ctx, t.Endpoint, t.Database, t.Collection, fromTime)
+			if err != nil {
+				log.Printf("[Correlation] no snapshot for %s/%s/%s: %v", t.Endpoint, t.Database, t.Collection, err)
+				continue
+			}
+		}
+		snapB, err := inst.Storage.FindClosestBefore(ctx, t.Endpoint, t.Database, t.Collection, toTime)
+		if err != nil {
+			continue
+		}
+
+		var delta snapshot.DeltaResult
+		if snapA.ID == snapB.ID {
+			delta = snapshot.SingleSnapshotResult(snapB)
+		} else {
+			between, _ := inst.Storage.FindBetween(ctx, t.Endpoint, t.Database, t.Collection, snapA.CapturedAt, snapB.CapturedAt)
+			delta = snapshot.CalcDelta(snapA, snapB, between)
+		}
+
+		// ── 2. Query COLLSCAN stats từ system.profile ────────────────────────
+		var collscanCount int64
+		var collscanAvgMs, collscanMaxMs float64
+
+		if mongoClient, ok := inst.MongoClients[t.Endpoint]; ok {
+			collscanPipeline := mongo.Pipeline{
+				{{Key: "$match", Value: bson.D{
+					{Key: "ns", Value: fmt.Sprintf("%s.%s", t.Database, t.Collection)},
+					{Key: "planSummary", Value: bson.M{"$regex": "COLLSCAN"}},
+					{Key: "ts", Value: bson.M{"$gte": fromTime, "$lte": toTime}},
+				}}},
+				{{Key: "$group", Value: bson.D{
+					{Key: "_id", Value: nil},
+					{Key: "count", Value: bson.D{{Key: "$sum", Value: 1}}},
+					{Key: "avg_ms", Value: bson.D{{Key: "$avg", Value: "$millis"}}},
+					{Key: "max_ms", Value: bson.D{{Key: "$max", Value: "$millis"}}},
+				}}},
+			}
+			qCtx, qCancel := context.WithTimeout(ctx, 10*time.Second)
+			cursor, err := mongoClient.Database(t.Database).Collection("system.profile").Aggregate(qCtx, collscanPipeline)
+			qCancel()
+			if err == nil {
+				var agg []bson.M
+				if cursor.All(qCtx, &agg) == nil && len(agg) > 0 { //nolint:contextcheck
+					collscanCount = int64Field(agg[0], "count")
+					collscanAvgMs = float64Field(agg[0], "avg_ms")
+					collscanMaxMs = float64Field(agg[0], "max_ms")
+				}
+			}
+		}
+
+		// ── 3. Kiểm tra có index nào delta == 0 không khi đang bị COLLSCAN ──
+		hasSuspect := false
+		if collscanCount > 0 {
+			for _, idx := range delta.Indexes {
+				if idx.Delta == 0 {
+					hasSuspect = true
+					break
+				}
+			}
+		}
+
+		results = append(results, IndexCorrelationResult{
+			Endpoint:                 delta.Endpoint,
+			Database:                 delta.Database,
+			Collection:               delta.Collection,
+			From:                     delta.From,
+			To:                       delta.To,
+			SingleSnapshot:           delta.SingleSnapshot,
+			Indexes:                  delta.Indexes,
+			CollscanCount:            collscanCount,
+			CollscanAvgMs:            collscanAvgMs,
+			CollscanMaxMs:            collscanMaxMs,
+			HasSuspectedMissingIndex: hasSuspect,
+		})
+	}
+
+	c.JSON(http.StatusOK, results)
+}
+
+// float64Field đọc field dạng số từ bson.M, trả về float64
+func float64Field(m bson.M, key string) float64 {
+	switch v := m[key].(type) {
+	case float64:
+		return v
+	case int32:
+		return float64(v)
+	case int64:
+		return float64(v)
+	}
+	return 0
+}
+
+// int64Field đọc field dạng số từ bson.M, trả về int64
+func int64Field(m bson.M, key string) int64 {
+	switch v := m[key].(type) {
+	case int32:
+		return int64(v)
+	case int64:
+		return v
+	case float64:
+		return int64(v)
+	}
+	return 0
+}
+
 func main() {
 	cfg, err := config.LoadConfig()
 	if err != nil {
@@ -395,6 +704,7 @@ func main() {
 		log.Fatalf("Failed to connect to storage MongoDB: %v", err)
 	}
 	store := snapshot.NewStorage(storageClient.Database(cfg.Storage.Database))
+	handler.Storage = store // cho GetIndexCorrelation dùng
 
 	idxCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	if err := store.EnsureIndexes(idxCtx); err != nil {
@@ -416,6 +726,11 @@ func main() {
 	r.GET("/mongodb-cmd/profiles", handler.GetProfiles)
 	r.GET("/mongodb-cmd/profile", handler.GetProfile)
 	r.DELETE("/mongodb-cmd/profile/query-hash", handler.DeleteProfileByQueryHash)
+	r.GET("/mongodb-cmd/collscan-stats", handler.GetCollscanStats)
+	r.GET("/mongodb-cmd/index-correlation", handler.GetIndexCorrelation)
+
+	currentOpHandler := &currentop.Handler{MongoClients: handler.MongoClients}
+	r.GET("/mongodb-cmd/current-ops", currentOpHandler.GetCurrentOps)
 
 	// Index stats chỉ available khi storage đã được cấu hình
 	if store != nil {
