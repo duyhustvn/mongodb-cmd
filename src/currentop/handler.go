@@ -37,16 +37,19 @@ type CurrentOp struct {
 	Client           string      `json:"client"`
 }
 
-/*
-# Tất cả op đang chạy trên endpoint
-GET /mongodb-cmd/current-ops?endpoint=172.17.0.1
-
-# Chỉ op chạy hơn 5 giây (an toàn khi perf test — payload nhỏ)
-GET /mongodb-cmd/current-ops?endpoint=172.17.0.1&min_duration_secs=5
-
-# Lọc theo collection + op type
-GET /mongodb-cmd/current-ops?endpoint=172.17.0.1&min_duration_secs=1&collection=orders&op_type=query
-*/
+// GetCurrentOps godoc
+// @Summary     Lấy danh sách operation đang chạy trên MongoDB
+// @Description Gọi lệnh currentOp với filter server-side. Khuyến nghị đặt min_duration_secs khi hệ thống đang perf test để tránh payload lớn.
+// @Tags        operations
+// @Produce     json
+// @Param       endpoint           query  string   true   "MongoDB host"
+// @Param       min_duration_secs  query  integer  false  "Chỉ lấy op chạy lâu hơn N giây (filter server-side)"
+// @Param       collection         query  string   false  "Lọc theo tên collection (regex)"
+// @Param       op_type            query  string   false  "Loại operation: query, update, insert, delete, command"
+// @Success     200  {object}  map[string]interface{}
+// @Failure     400  {object}  map[string]string
+// @Failure     500  {object}  map[string]string
+// @Router      /mongodb-cmd/current-ops [get]
 func (h *Handler) GetCurrentOps(c *gin.Context) {
 	var req currentOpQuery
 	if err := c.ShouldBindQuery(&req); err != nil {

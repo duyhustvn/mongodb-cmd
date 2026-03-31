@@ -9,6 +9,7 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY src ./src
+COPY docs ./docs
 COPY main.go .
 
 # Build the Go binary for Linux

@@ -1,0 +1,715 @@
+{
+    "schemes": [
+        "http",
+        "https"
+    ],
+    "swagger": "2.0",
+    "info": {
+        "description": "Real-time monitoring for MongoDB: slow queries, index usage, COLLSCAN detection, and current operations.",
+        "title": "MongoDB Profiler API",
+        "contact": {},
+        "version": "1.0"
+    },
+    "host": "localhost:8080",
+    "basePath": "/",
+    "paths": {
+        "/mongodb-cmd/collscan-stats": {
+            "get": {
+                "description": "Trả về danh sách collection bị collection scan (COLLSCAN) nhiều nhất trong khoảng thời gian, kèm avg/max ms và 5 sample query.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "analytics"
+                ],
+                "summary": "Thống kê COLLSCAN từ system.profile",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "MongoDB host",
+                        "name": "endpoint",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Tên database",
+                        "name": "database",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Lọc theo collection",
+                        "name": "collection",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "RFC3339 — mặc định 24h trước (ví dụ: 2025-01-01T00:00:00Z)",
+                        "name": "from",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "RFC3339 — mặc định now",
+                        "name": "to",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Số collection trả về tối đa (mặc định 20)",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "additionalProperties": true
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/mongodb-cmd/current-ops": {
+            "get": {
+                "description": "Gọi lệnh currentOp với filter server-side. Khuyến nghị đặt min_duration_secs khi hệ thống đang perf test để tránh payload lớn.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "operations"
+                ],
+                "summary": "Lấy danh sách operation đang chạy trên MongoDB",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "MongoDB host",
+                        "name": "endpoint",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Chỉ lấy op chạy lâu hơn N giây (filter server-side)",
+                        "name": "min_duration_secs",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Lọc theo tên collection (regex)",
+                        "name": "collection",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Loại operation: query, update, insert, delete, command",
+                        "name": "op_type",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/mongodb-cmd/index-correlation": {
+            "get": {
+                "description": "Kết hợp index usage delta (từ snapshots) với số lần COLLSCAN (từ system.profile) để xác định collection có khả năng thiếu index. has_suspected_missing_index=true khi collection bị COLLSCAN nhưng có index chưa dùng.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "analytics"
+                ],
+                "summary": "Tương quan index usage với COLLSCAN để tìm missing index",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Lọc theo database",
+                        "name": "database",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Lọc theo collection",
+                        "name": "collection",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "RFC3339 — mặc định 24h trước",
+                        "name": "from",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "RFC3339 — mặc định now",
+                        "name": "to",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/main.IndexCorrelationResult"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/mongodb-cmd/index-stats": {
+            "get": {
+                "description": "Tính delta số lần sử dụng của mỗi index giữa hai snapshot. Hỗ trợ filter ops_gt/ops_lt để tìm index hot hoặc dead. Trả về single_snapshot=true nếu chỉ có 1 snapshot trong khoảng thời gian.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "index"
+                ],
+                "summary": "Thống kê usage của từng index theo khoảng thời gian",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Lọc theo database",
+                        "name": "database",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Lọc theo collection",
+                        "name": "collection",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "RFC3339 — mặc định 24h trước (ví dụ: 2025-01-01T00:00:00Z)",
+                        "name": "from",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "RFC3339 — mặc định now",
+                        "name": "to",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Chỉ lấy index có delta \u003e N lần (tìm hot index)",
+                        "name": "ops_gt",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Chỉ lấy index có delta \u003c N lần (tìm dead index)",
+                        "name": "ops_lt",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/snapshot.DeltaResult"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/mongodb-cmd/profile": {
+            "get": {
+                "description": "Truy vấn system.profile với nhiều tùy chọn lọc: collection, duration, thời gian, phân trang. Hỗ trợ chế độ unique để gom nhóm theo queryHash.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "profile"
+                ],
+                "summary": "Lấy danh sách slow query từ system.profile",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "MongoDB host (ví dụ: 172.17.0.1:27017)",
+                        "name": "endpoint",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Tên database",
+                        "name": "database",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Lọc theo collection",
+                        "name": "collection",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Chỉ lấy query chậm hơn N ms",
+                        "name": "duration",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Số kết quả tối đa (mặc định 20)",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Bỏ qua N kết quả đầu (phân trang)",
+                        "name": "offset",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Field sắp xếp (mặc định: ts)",
+                        "name": "order_by",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "asc hoặc desc (mặc định: desc)",
+                        "name": "order_type",
+                        "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Gom nhóm theo queryHash, trả về thống kê",
+                        "name": "unique",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "RFC3339 — lấy từ thời điểm này (ví dụ: 2025-01-01T00:00:00Z)",
+                        "name": "from",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "RFC3339 — lấy đến thời điểm này",
+                        "name": "to",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "additionalProperties": true
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/mongodb-cmd/profile/query-hash": {
+            "delete": {
+                "description": "Xóa tất cả document trong system.profile có queryHash khớp với giá trị yêu cầu.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "profile"
+                ],
+                "summary": "Xóa slow query entries theo queryHash",
+                "parameters": [
+                    {
+                        "description": "Thông tin xóa",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/main.DeleteProfileByQueryHashRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/main.DeleteProfileByQueryHashResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/mongodb-cmd/profiles": {
+            "get": {
+                "description": "Trả về số lượng document trong system.profile của từng database trên mỗi MongoDB host đang giám sát.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "profile"
+                ],
+                "summary": "Đếm số slow query entries trong system.profile trên tất cả host",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Danh sách database cách nhau bằng dấu phẩy (bỏ trống = tất cả)",
+                        "name": "databases",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/main.CountSystemProfileResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "definitions": {
+        "main.CountSystemProfileResponse": {
+            "type": "object",
+            "properties": {
+                "results": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/main.CountSystemProfileResult"
+                    }
+                }
+            }
+        },
+        "main.CountSystemProfileResult": {
+            "type": "object",
+            "properties": {
+                "count": {
+                    "type": "integer"
+                },
+                "database": {
+                    "type": "string"
+                },
+                "error": {
+                    "type": "string"
+                },
+                "url": {
+                    "type": "string"
+                }
+            }
+        },
+        "main.DeleteProfileByQueryHashRequest": {
+            "type": "object",
+            "required": [
+                "database",
+                "endpoint",
+                "query_hash"
+            ],
+            "properties": {
+                "database": {
+                    "type": "string"
+                },
+                "endpoint": {
+                    "type": "string"
+                },
+                "query_hash": {
+                    "type": "string"
+                }
+            }
+        },
+        "main.DeleteProfileByQueryHashResponse": {
+            "type": "object",
+            "properties": {
+                "database": {
+                    "type": "string"
+                },
+                "deleted_count": {
+                    "type": "integer"
+                },
+                "endpoint": {
+                    "type": "string"
+                },
+                "query_hash": {
+                    "type": "string"
+                }
+            }
+        },
+        "main.IndexCorrelationResult": {
+            "type": "object",
+            "properties": {
+                "collection": {
+                    "type": "string"
+                },
+                "collscan_avg_ms": {
+                    "type": "number"
+                },
+                "collscan_count": {
+                    "type": "integer"
+                },
+                "collscan_max_ms": {
+                    "type": "number"
+                },
+                "database": {
+                    "type": "string"
+                },
+                "endpoint": {
+                    "type": "string"
+                },
+                "from": {
+                    "type": "string"
+                },
+                "has_suspected_missing_index": {
+                    "type": "boolean"
+                },
+                "indexes": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/snapshot.IndexDelta"
+                    }
+                },
+                "single_snapshot": {
+                    "type": "boolean"
+                },
+                "to": {
+                    "type": "string"
+                }
+            }
+        },
+        "snapshot.DeltaResult": {
+            "type": "object",
+            "properties": {
+                "collection": {
+                    "type": "string"
+                },
+                "database": {
+                    "type": "string"
+                },
+                "endpoint": {
+                    "type": "string"
+                },
+                "from": {
+                    "description": "captured_at của snapA",
+                    "type": "string"
+                },
+                "indexes": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/snapshot.IndexDelta"
+                    }
+                },
+                "single_snapshot": {
+                    "description": "true nếu chỉ có 1 snapshot, không có delta",
+                    "type": "boolean"
+                },
+                "to": {
+                    "description": "captured_at của snapB",
+                    "type": "string"
+                }
+            }
+        },
+        "snapshot.IndexDelta": {
+            "type": "object",
+            "properties": {
+                "data_loss": {
+                    "description": "true nếu không có snapshot nào sau restart → không có baseline",
+                    "type": "boolean"
+                },
+                "delta": {
+                    "type": "integer"
+                },
+                "is_partial": {
+                    "description": "Thông tin restart nếu có",
+                    "type": "boolean"
+                },
+                "key": {
+                    "type": "object",
+                    "additionalProperties": true
+                },
+                "name": {
+                    "type": "string"
+                },
+                "ops_at_from": {
+                    "description": "Ops thực tế tại 2 đầu khoảng (sau khi chọn baseline đúng)",
+                    "type": "integer"
+                },
+                "ops_at_to": {
+                    "type": "integer"
+                },
+                "restart_at": {
+                    "description": "thời điểm snapshot đầu tiên sau restart",
+                    "type": "string"
+                },
+                "restart_detected": {
+                    "type": "boolean"
+                }
+            }
+        }
+    }
+}

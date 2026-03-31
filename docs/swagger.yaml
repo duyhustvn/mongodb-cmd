@@ -1,0 +1,486 @@
+basePath: /
+definitions:
+  main.CountSystemProfileResponse:
+    properties:
+      results:
+        items:
+          $ref: '#/definitions/main.CountSystemProfileResult'
+        type: array
+    type: object
+  main.CountSystemProfileResult:
+    properties:
+      count:
+        type: integer
+      database:
+        type: string
+      error:
+        type: string
+      url:
+        type: string
+    type: object
+  main.DeleteProfileByQueryHashRequest:
+    properties:
+      database:
+        type: string
+      endpoint:
+        type: string
+      query_hash:
+        type: string
+    required:
+    - database
+    - endpoint
+    - query_hash
+    type: object
+  main.DeleteProfileByQueryHashResponse:
+    properties:
+      database:
+        type: string
+      deleted_count:
+        type: integer
+      endpoint:
+        type: string
+      query_hash:
+        type: string
+    type: object
+  main.IndexCorrelationResult:
+    properties:
+      collection:
+        type: string
+      collscan_avg_ms:
+        type: number
+      collscan_count:
+        type: integer
+      collscan_max_ms:
+        type: number
+      database:
+        type: string
+      endpoint:
+        type: string
+      from:
+        type: string
+      has_suspected_missing_index:
+        type: boolean
+      indexes:
+        items:
+          $ref: '#/definitions/snapshot.IndexDelta'
+        type: array
+      single_snapshot:
+        type: boolean
+      to:
+        type: string
+    type: object
+  snapshot.DeltaResult:
+    properties:
+      collection:
+        type: string
+      database:
+        type: string
+      endpoint:
+        type: string
+      from:
+        description: captured_at của snapA
+        type: string
+      indexes:
+        items:
+          $ref: '#/definitions/snapshot.IndexDelta'
+        type: array
+      single_snapshot:
+        description: true nếu chỉ có 1 snapshot, không có delta
+        type: boolean
+      to:
+        description: captured_at của snapB
+        type: string
+    type: object
+  snapshot.IndexDelta:
+    properties:
+      data_loss:
+        description: true nếu không có snapshot nào sau restart → không có baseline
+        type: boolean
+      delta:
+        type: integer
+      is_partial:
+        description: Thông tin restart nếu có
+        type: boolean
+      key:
+        additionalProperties: true
+        type: object
+      name:
+        type: string
+      ops_at_from:
+        description: Ops thực tế tại 2 đầu khoảng (sau khi chọn baseline đúng)
+        type: integer
+      ops_at_to:
+        type: integer
+      restart_at:
+        description: thời điểm snapshot đầu tiên sau restart
+        type: string
+      restart_detected:
+        type: boolean
+    type: object
+host: localhost:8080
+info:
+  contact: {}
+  description: 'Real-time monitoring for MongoDB: slow queries, index usage, COLLSCAN
+    detection, and current operations.'
+  title: MongoDB Profiler API
+  version: "1.0"
+paths:
+  /mongodb-cmd/collscan-stats:
+    get:
+      description: Trả về danh sách collection bị collection scan (COLLSCAN) nhiều
+        nhất trong khoảng thời gian, kèm avg/max ms và 5 sample query.
+      parameters:
+      - description: MongoDB host
+        in: query
+        name: endpoint
+        required: true
+        type: string
+      - description: Tên database
+        in: query
+        name: database
+        required: true
+        type: string
+      - description: Lọc theo collection
+        in: query
+        name: collection
+        type: string
+      - description: 'RFC3339 — mặc định 24h trước (ví dụ: 2025-01-01T00:00:00Z)'
+        in: query
+        name: from
+        type: string
+      - description: RFC3339 — mặc định now
+        in: query
+        name: to
+        type: string
+      - description: Số collection trả về tối đa (mặc định 20)
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              additionalProperties: true
+              type: object
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Thống kê COLLSCAN từ system.profile
+      tags:
+      - analytics
+  /mongodb-cmd/current-ops:
+    get:
+      description: Gọi lệnh currentOp với filter server-side. Khuyến nghị đặt min_duration_secs
+        khi hệ thống đang perf test để tránh payload lớn.
+      parameters:
+      - description: MongoDB host
+        in: query
+        name: endpoint
+        required: true
+        type: string
+      - description: Chỉ lấy op chạy lâu hơn N giây (filter server-side)
+        in: query
+        name: min_duration_secs
+        type: integer
+      - description: Lọc theo tên collection (regex)
+        in: query
+        name: collection
+        type: string
+      - description: 'Loại operation: query, update, insert, delete, command'
+        in: query
+        name: op_type
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Lấy danh sách operation đang chạy trên MongoDB
+      tags:
+      - operations
+  /mongodb-cmd/index-correlation:
+    get:
+      description: Kết hợp index usage delta (từ snapshots) với số lần COLLSCAN (từ
+        system.profile) để xác định collection có khả năng thiếu index. has_suspected_missing_index=true
+        khi collection bị COLLSCAN nhưng có index chưa dùng.
+      parameters:
+      - description: Lọc theo database
+        in: query
+        name: database
+        type: string
+      - description: Lọc theo collection
+        in: query
+        name: collection
+        type: string
+      - description: RFC3339 — mặc định 24h trước
+        in: query
+        name: from
+        type: string
+      - description: RFC3339 — mặc định now
+        in: query
+        name: to
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/main.IndexCorrelationResult'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Tương quan index usage với COLLSCAN để tìm missing index
+      tags:
+      - analytics
+  /mongodb-cmd/index-stats:
+    get:
+      description: Tính delta số lần sử dụng của mỗi index giữa hai snapshot. Hỗ trợ
+        filter ops_gt/ops_lt để tìm index hot hoặc dead. Trả về single_snapshot=true
+        nếu chỉ có 1 snapshot trong khoảng thời gian.
+      parameters:
+      - description: Lọc theo database
+        in: query
+        name: database
+        type: string
+      - description: Lọc theo collection
+        in: query
+        name: collection
+        type: string
+      - description: 'RFC3339 — mặc định 24h trước (ví dụ: 2025-01-01T00:00:00Z)'
+        in: query
+        name: from
+        type: string
+      - description: RFC3339 — mặc định now
+        in: query
+        name: to
+        type: string
+      - description: Chỉ lấy index có delta > N lần (tìm hot index)
+        in: query
+        name: ops_gt
+        type: integer
+      - description: Chỉ lấy index có delta < N lần (tìm dead index)
+        in: query
+        name: ops_lt
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/snapshot.DeltaResult'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Thống kê usage của từng index theo khoảng thời gian
+      tags:
+      - index
+  /mongodb-cmd/profile:
+    get:
+      description: 'Truy vấn system.profile với nhiều tùy chọn lọc: collection, duration,
+        thời gian, phân trang. Hỗ trợ chế độ unique để gom nhóm theo queryHash.'
+      parameters:
+      - description: 'MongoDB host (ví dụ: 172.17.0.1:27017)'
+        in: query
+        name: endpoint
+        required: true
+        type: string
+      - description: Tên database
+        in: query
+        name: database
+        required: true
+        type: string
+      - description: Lọc theo collection
+        in: query
+        name: collection
+        type: string
+      - description: Chỉ lấy query chậm hơn N ms
+        in: query
+        name: duration
+        type: integer
+      - description: Số kết quả tối đa (mặc định 20)
+        in: query
+        name: limit
+        type: integer
+      - description: Bỏ qua N kết quả đầu (phân trang)
+        in: query
+        name: offset
+        type: integer
+      - description: 'Field sắp xếp (mặc định: ts)'
+        in: query
+        name: order_by
+        type: string
+      - description: 'asc hoặc desc (mặc định: desc)'
+        in: query
+        name: order_type
+        type: string
+      - description: Gom nhóm theo queryHash, trả về thống kê
+        in: query
+        name: unique
+        type: boolean
+      - description: 'RFC3339 — lấy từ thời điểm này (ví dụ: 2025-01-01T00:00:00Z)'
+        in: query
+        name: from
+        type: string
+      - description: RFC3339 — lấy đến thời điểm này
+        in: query
+        name: to
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              additionalProperties: true
+              type: object
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Lấy danh sách slow query từ system.profile
+      tags:
+      - profile
+  /mongodb-cmd/profile/query-hash:
+    delete:
+      consumes:
+      - application/json
+      description: Xóa tất cả document trong system.profile có queryHash khớp với
+        giá trị yêu cầu.
+      parameters:
+      - description: Thông tin xóa
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/main.DeleteProfileByQueryHashRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/main.DeleteProfileByQueryHashResponse'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Xóa slow query entries theo queryHash
+      tags:
+      - profile
+  /mongodb-cmd/profiles:
+    get:
+      description: Trả về số lượng document trong system.profile của từng database
+        trên mỗi MongoDB host đang giám sát.
+      parameters:
+      - description: Danh sách database cách nhau bằng dấu phẩy (bỏ trống = tất cả)
+        in: query
+        name: databases
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/main.CountSystemProfileResponse'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Đếm số slow query entries trong system.profile trên tất cả host
+      tags:
+      - profile
+schemes:
+- http
+- https
+swagger: "2.0"

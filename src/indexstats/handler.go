@@ -28,31 +28,22 @@ type indexStatsQuery struct {
 	OpsLt *int64 `form:"ops_lt"`
 }
 
-/*
-# Lấy tất cả endpoint + database + collection (mặc định 24h qua)
-GET /mongodb-cmd/index-stats
-
-# Lọc theo database
-GET /mongodb-cmd/index-stats?database=mydb
-
-# Lọc theo database + collection
-GET /mongodb-cmd/index-stats?database=mydb&collection=orders
-
-# Với khoảng thời gian tuỳ chọn
-GET /mongodb-cmd/index-stats?database=mydb&from=2025-01-01T00:00:00Z&to=2025-03-01T00:00:00Z
-
-# Index được dùng nhiều hơn 100 lần (tìm index đang hot)
-GET /mongodb-cmd/index-stats?ops_gt=100
-
-# Index được dùng ít hơn 10 lần (tìm index gần chết)
-GET /mongodb-cmd/index-stats?ops_lt=10
-
-# Kết hợp: dùng trong khoảng 1-100 lần
-GET /mongodb-cmd/index-stats?ops_gt=0&ops_lt=100
-
-# Lọc index chưa dùng lần nào (dead index)
-GET /mongodb-cmd/index-stats?ops_lt=1
-*/
+// GetIndexStats godoc
+// @Summary     Thống kê usage của từng index theo khoảng thời gian
+// @Description Tính delta số lần sử dụng của mỗi index giữa hai snapshot. Hỗ trợ filter ops_gt/ops_lt để tìm index hot hoặc dead. Trả về single_snapshot=true nếu chỉ có 1 snapshot trong khoảng thời gian.
+// @Tags        index
+// @Produce     json
+// @Param       database    query  string   false  "Lọc theo database"
+// @Param       collection  query  string   false  "Lọc theo collection"
+// @Param       from        query  string   false  "RFC3339 — mặc định 24h trước (ví dụ: 2025-01-01T00:00:00Z)"
+// @Param       to          query  string   false  "RFC3339 — mặc định now"
+// @Param       ops_gt      query  integer  false  "Chỉ lấy index có delta > N lần (tìm hot index)"
+// @Param       ops_lt      query  integer  false  "Chỉ lấy index có delta < N lần (tìm dead index)"
+// @Success     200  {array}   snapshot.DeltaResult
+// @Failure     400  {object}  map[string]string
+// @Failure     404  {object}  map[string]string
+// @Failure     500  {object}  map[string]string
+// @Router      /mongodb-cmd/index-stats [get]
 func (h *Handler) GetIndexStats(c *gin.Context) {
 	var req indexStatsQuery
 	if err := c.ShouldBindQuery(&req); err != nil {
