@@ -6,9 +6,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
 // Handler xử lý các request liên quan đến Replica Set.
@@ -78,7 +77,7 @@ func (h *Handler) GetReplicaStatus(c *gin.Context) {
 	// Parse tên set, date, myState
 	setName, _ := raw["set"].(string)
 	myState := int(toInt64(raw["myState"]))
-	serverDate, _ := raw["date"].(primitive.DateTime)
+	serverDate, _ := raw["date"].(bson.DateTime)
 	date := serverDate.Time().UTC()
 
 	// Tìm optimeDate của PRIMARY để tính lag
@@ -90,7 +89,7 @@ func (h *Handler) GetReplicaStatus(c *gin.Context) {
 			continue
 		}
 		if int(toInt64(mm["state"])) == 1 { // PRIMARY
-			if od, ok := mm["optimeDate"].(primitive.DateTime); ok {
+			if od, ok := mm["optimeDate"].(bson.DateTime); ok {
 				t := od.Time().UTC()
 				primaryOptimeDate = &t
 			}
@@ -112,7 +111,7 @@ func (h *Handler) GetReplicaStatus(c *gin.Context) {
 			continue
 		}
 		state := int(toInt64(mm["state"]))
-		optimeDateRaw, _ := mm["optimeDate"].(primitive.DateTime)
+		optimeDateRaw, _ := mm["optimeDate"].(bson.DateTime)
 		optimeDate := optimeDateRaw.Time().UTC()
 
 		ms := MemberStatus{

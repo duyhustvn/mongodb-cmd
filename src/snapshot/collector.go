@@ -7,9 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
 type Collector struct {
@@ -129,7 +128,7 @@ func getServerStartTime(ctx context.Context, client *mongo.Client) (time.Time, e
 	if err := client.Database("admin").RunCommand(ctx, bson.D{{Key: "serverStatus", Value: 1}}).Decode(&result); err != nil {
 		return time.Time{}, err
 	}
-	localTime, ok := result["localTime"].(primitive.DateTime)
+	localTime, ok := result["localTime"].(bson.DateTime)
 	if !ok {
 		return time.Time{}, fmt.Errorf("missing localTime in serverStatus")
 	}

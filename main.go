@@ -19,9 +19,9 @@ import (
 	"github.com/gin-gonic/gin"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 func NewMongodbConfig(config *config.Config) []string {
@@ -76,7 +76,7 @@ func NewHandler(cfg *config.Config) *handler {
 		host := parsed.Hostname()
 
 		clientOpts := options.Client().ApplyURI(u)
-		client, err := mongo.Connect(ctx, clientOpts)
+		client, err := mongo.Connect(clientOpts)
 		if err != nil {
 			log.Printf("Failed to create client for %s: %v\n", host, err)
 			panic(err)
@@ -384,7 +384,7 @@ func newStorageClient(cfg *config.Config) (*mongo.Client, error) {
 	defer cancel()
 
 	clientOpts := options.Client().ApplyURI(uri)
-	client, err := mongo.Connect(ctx, clientOpts)
+	client, err := mongo.Connect(clientOpts)
 	if err != nil {
 		return nil, fmt.Errorf("storage connect error: %w", err)
 	}
