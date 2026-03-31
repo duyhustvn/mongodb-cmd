@@ -536,6 +536,115 @@ const docTemplate = `{
                     }
                 }
             }
+        },
+        "/mongodb-cmd/replica-status": {
+            "get": {
+                "description": "Gọi rs.status() để lấy thông tin tất cả member: state, health, replication lag. lag_seconds=null nếu member là PRIMARY.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "replication"
+                ],
+                "summary": "Lấy trạng thái Replica Set",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "MongoDB host (phải là member của replica set)",
+                        "name": "endpoint",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/replicaset.ReplicaSetStatus"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/mongodb-cmd/snapshots": {
+            "delete": {
+                "description": "Xóa tất cả index snapshot có captured_at \u003c before. Nếu không truyền endpoint thì xóa trên tất cả host. Dùng để tránh storage phình theo thời gian.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "snapshot"
+                ],
+                "summary": "Xóa snapshot cũ để giải phóng storage",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "RFC3339 — xóa snapshot trước thời điểm này (ví dụ: 2025-01-01T00:00:00Z)",
+                        "name": "before",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Chỉ xóa snapshot của endpoint này (bỏ trống = tất cả)",
+                        "name": "endpoint",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/main.DeleteSnapshotsResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
         }
     },
     "definitions": {
@@ -603,6 +712,20 @@ const docTemplate = `{
                 }
             }
         },
+        "main.DeleteSnapshotsResponse": {
+            "type": "object",
+            "properties": {
+                "before": {
+                    "type": "string"
+                },
+                "deleted_count": {
+                    "type": "integer"
+                },
+                "endpoint": {
+                    "type": "string"
+                }
+            }
+        },
         "main.IndexCorrelationResult": {
             "type": "object",
             "properties": {
@@ -640,6 +763,75 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "to": {
+                    "type": "string"
+                }
+            }
+        },
+        "replicaset.MemberStatus": {
+            "type": "object",
+            "properties": {
+                "health": {
+                    "description": "1 = up, 0 = down",
+                    "type": "number"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "lag_seconds": {
+                    "description": "nil nếu là primary",
+                    "type": "number"
+                },
+                "last_error": {
+                    "description": "lỗi heartbeat nếu có",
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "optime_date": {
+                    "description": "thời điểm áp dụng oplog gần nhất",
+                    "type": "string"
+                },
+                "self": {
+                    "description": "true nếu đây là node đang hỏi",
+                    "type": "boolean"
+                },
+                "state": {
+                    "description": "1=PRIMARY, 2=SECONDARY, 7=ARBITER...",
+                    "type": "integer"
+                },
+                "state_str": {
+                    "description": "\"PRIMARY\", \"SECONDARY\", \"RECOVERING\"...",
+                    "type": "string"
+                },
+                "uptime": {
+                    "description": "giây",
+                    "type": "integer"
+                }
+            }
+        },
+        "replicaset.ReplicaSetStatus": {
+            "type": "object",
+            "properties": {
+                "date": {
+                    "description": "thời điểm lấy status",
+                    "type": "string"
+                },
+                "endpoint": {
+                    "type": "string"
+                },
+                "members": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/replicaset.MemberStatus"
+                    }
+                },
+                "my_state": {
+                    "description": "state của node đang được hỏi",
+                    "type": "integer"
+                },
+                "set": {
+                    "description": "tên replica set",
                     "type": "string"
                 }
             }
@@ -719,7 +911,7 @@ const docTemplate = `{
 // SwaggerInfo holds exported Swagger Info so clients can modify it
 var SwaggerInfo = &swag.Spec{
 	Version:          "1.0",
-	Host:             "localhost:8080",
+	Host:             "localhost:8082",
 	BasePath:         "/",
 	Schemes:          []string{"http", "https"},
 	Title:            "MongoDB Profiler API",

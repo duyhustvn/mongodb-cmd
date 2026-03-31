@@ -13,6 +13,7 @@ import (
 	"mongo-profiler/src/config"
 	"mongo-profiler/src/currentop"
 	"mongo-profiler/src/indexstats"
+	"mongo-profiler/src/replicaset"
 	"mongo-profiler/src/snapshot"
 
 	"github.com/gin-gonic/gin"
@@ -449,6 +450,66 @@ func (inst *handler) DeleteProfileByQueryHash(c *gin.Context) {
 	})
 }
 
+// ─── Snapshot Retention ───────────────────────────────────────────────────────
+
+type DeleteSnapshotsQuery struct {
+	// before là RFC3339 — xóa tất cả snapshot có captured_at trước thời điểm này
+	Before   string `form:"before" binding:"required"`
+	Endpoint string `form:"endpoint"` // tuỳ chọn, bỏ trống = tất cả endpoint
+}
+
+type DeleteSnapshotsResponse struct {
+	Before       string `json:"before"`
+	Endpoint     string `json:"endpoint,omitempty"`
+	DeletedCount int64  `json:"deleted_count"`
+}
+
+// DeleteSnapshots godoc
+// @Summary     Xóa snapshot cũ để giải phóng storage
+// @Description Xóa tất cả index snapshot có captured_at < before. Nếu không truyền endpoint thì xóa trên tất cả host. Dùng để tránh storage phình theo thời gian.
+// @Tags        snapshot
+// @Produce     json
+// @Param       before    query  string  true   "RFC3339 — xóa snapshot trước thời điểm này (ví dụ: 2025-01-01T00:00:00Z)"
+// @Param       endpoint  query  string  false  "Chỉ xóa snapshot của endpoint này (bỏ trống = tất cả)"
+// @Success     200  {object}  DeleteSnapshotsResponse
+// @Failure     400  {object}  map[string]string
+// @Failure     500  {object}  map[string]string
+// @Failure     503  {object}  map[string]string
+// @Router      /mongodb-cmd/snapshots [delete]
+func (inst *handler) DeleteSnapshots(c *gin.Context) {
+	if inst.Storage == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "storage not configured"})
+		return
+	}
+
+	var req DeleteSnapshotsQuery
+	if err := c.ShouldBindQuery(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	before, err := time.Parse(time.RFC3339, req.Before)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid before (expect RFC3339): " + err.Error()})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
+	defer cancel()
+
+	deleted, err := inst.Storage.DeleteBefore(ctx, before, req.Endpoint)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, DeleteSnapshotsResponse{
+		Before:       req.Before,
+		Endpoint:     req.Endpoint,
+		DeletedCount: deleted,
+	})
+}
+
 // ─── Part 5: COLLSCAN Stats ───────────────────────────────────────────────────
 
 type CollscanStatsQuery struct {
@@ -769,7 +830,7 @@ func int64Field(m bson.M, key string) int64 {
 // @title           MongoDB Profiler API
 // @version         1.0
 // @description     Real-time monitoring for MongoDB: slow queries, index usage, COLLSCAN detection, and current operations.
-// @host            localhost:8080
+// @host            localhost:8082
 // @BasePath        /
 // @schemes         http https
 func main() {
@@ -786,7 +847,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to connect to storage MongoDB: %v", err)
 	}
-	store := snapshot.NewStorage(storageClient.Database(cfg.Storage.Database))
+	store := snapshot.NewStorage(storageClient.Database(cfg.Storage.Database), cfg.Snapshot.RetentionDays)
 	handler.Storage = store // cho GetIndexCorrelation dùng
 
 	idxCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -819,6 +880,11 @@ func main() {
 
 	currentOpHandler := &currentop.Handler{MongoClients: handler.MongoClients}
 	r.GET("/mongodb-cmd/current-ops", currentOpHandler.GetCurrentOps)
+
+	rsHandler := &replicaset.Handler{MongoClients: handler.MongoClients}
+	r.GET("/mongodb-cmd/replica-status", rsHandler.GetReplicaStatus)
+
+	r.DELETE("/mongodb-cmd/snapshots", handler.DeleteSnapshots)
 
 	// Index stats chỉ available khi storage đã được cấu hình
 	if store != nil {

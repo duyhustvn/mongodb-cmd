@@ -20,6 +20,9 @@ type StorageConfig struct {
 // SnapshotConfig: cấu hình background collector
 type SnapshotConfig struct {
 	IntervalMinutes int `mapstructure:"interval_minutes"`
+	// RetentionDays: số ngày giữ snapshot, snapshot cũ hơn sẽ tự động bị xóa bởi TTL index.
+	// Mặc định 90 ngày. Đặt 0 để tắt TTL.
+	RetentionDays int `mapstructure:"retention_days"`
 }
 
 type Config struct {
@@ -41,6 +44,7 @@ func LoadConfig() (config *Config, err error) {
 	v.SetDefault("storage.uri", "")
 	v.SetDefault("storage.database", "mongo_monitoring")
 	v.SetDefault("snapshot.interval_minutes", 60)
+	v.SetDefault("snapshot.retention_days", 90)
 
 	// config read from yaml
 	v.AddConfigPath(".") // search at this directory

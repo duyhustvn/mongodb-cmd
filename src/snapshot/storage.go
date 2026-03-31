@@ -12,23 +12,40 @@ import (
 const snapshotCollection = "index_snapshots"
 
 type Storage struct {
-	db *mongo.Database
+	db            *mongo.Database
+	retentionDays int // số ngày giữ snapshot, 0 = không TTL
 }
 
-func NewStorage(db *mongo.Database) *Storage {
-	return &Storage{db: db}
+func NewStorage(db *mongo.Database, retentionDays int) *Storage {
+	return &Storage{db: db, retentionDays: retentionDays}
 }
 
-// EnsureIndexes tạo index cho collection lưu snapshot để query nhanh
+// EnsureIndexes tạo index cho collection lưu snapshot để query nhanh.
+// Nếu retentionDays > 0, tạo thêm TTL index trên field captured_at để
+// MongoDB tự động xóa document cũ hơn retentionDays ngày.
 func (s *Storage) EnsureIndexes(ctx context.Context) error {
-	_, err := s.db.Collection(snapshotCollection).Indexes().CreateOne(ctx, mongo.IndexModel{
-		Keys: bson.D{
-			{Key: "endpoint", Value: 1},
-			{Key: "database", Value: 1},
-			{Key: "collection", Value: 1},
-			{Key: "captured_at", Value: -1},
+	indexes := []mongo.IndexModel{
+		// Compound index cho query nhanh theo endpoint/database/collection/time
+		{
+			Keys: bson.D{
+				{Key: "endpoint", Value: 1},
+				{Key: "database", Value: 1},
+				{Key: "collection", Value: 1},
+				{Key: "captured_at", Value: -1},
+			},
 		},
-	})
+	}
+
+	// TTL index: tự động xóa document sau retentionDays ngày
+	if s.retentionDays > 0 {
+		ttlSeconds := int32(s.retentionDays * 24 * 3600)
+		indexes = append(indexes, mongo.IndexModel{
+			Keys:    bson.D{{Key: "captured_at", Value: 1}},
+			Options: options.Index().SetExpireAfterSeconds(ttlSeconds),
+		})
+	}
+
+	_, err := s.db.Collection(snapshotCollection).Indexes().CreateMany(ctx, indexes)
 	return err
 }
 
@@ -144,6 +161,23 @@ func (s *Storage) FindEarliest(ctx context.Context, endpoint, database, collecti
 		return nil, err
 	}
 	return &snap, nil
+}
+
+// DeleteBefore xóa tất cả snapshot có captured_at < before.
+// endpoint tuỳ chọn: trống = xóa trên tất cả endpoint, có giá trị = chỉ xóa endpoint đó.
+// Trả về số document đã xóa.
+func (s *Storage) DeleteBefore(ctx context.Context, before time.Time, endpoint string) (int64, error) {
+	filter := bson.M{
+		"captured_at": bson.M{"$lt": before},
+	}
+	if endpoint != "" {
+		filter["endpoint"] = endpoint
+	}
+	result, err := s.db.Collection(snapshotCollection).DeleteMany(ctx, filter)
+	if err != nil {
+		return 0, err
+	}
+	return result.DeletedCount, nil
 }
 
 // FindBetween lấy tất cả snapshot nằm GIỮA 2 thời điểm (exclusive cả 2 đầu)

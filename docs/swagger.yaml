@@ -42,6 +42,15 @@ definitions:
       query_hash:
         type: string
     type: object
+  main.DeleteSnapshotsResponse:
+    properties:
+      before:
+        type: string
+      deleted_count:
+        type: integer
+      endpoint:
+        type: string
+    type: object
   main.IndexCorrelationResult:
     properties:
       collection:
@@ -67,6 +76,55 @@ definitions:
       single_snapshot:
         type: boolean
       to:
+        type: string
+    type: object
+  replicaset.MemberStatus:
+    properties:
+      health:
+        description: 1 = up, 0 = down
+        type: number
+      id:
+        type: integer
+      lag_seconds:
+        description: nil nếu là primary
+        type: number
+      last_error:
+        description: lỗi heartbeat nếu có
+        type: string
+      name:
+        type: string
+      optime_date:
+        description: thời điểm áp dụng oplog gần nhất
+        type: string
+      self:
+        description: true nếu đây là node đang hỏi
+        type: boolean
+      state:
+        description: 1=PRIMARY, 2=SECONDARY, 7=ARBITER...
+        type: integer
+      state_str:
+        description: '"PRIMARY", "SECONDARY", "RECOVERING"...'
+        type: string
+      uptime:
+        description: giây
+        type: integer
+    type: object
+  replicaset.ReplicaSetStatus:
+    properties:
+      date:
+        description: thời điểm lấy status
+        type: string
+      endpoint:
+        type: string
+      members:
+        items:
+          $ref: '#/definitions/replicaset.MemberStatus'
+        type: array
+      my_state:
+        description: state của node đang được hỏi
+        type: integer
+      set:
+        description: tên replica set
         type: string
     type: object
   snapshot.DeltaResult:
@@ -117,7 +175,7 @@ definitions:
       restart_detected:
         type: boolean
     type: object
-host: localhost:8080
+host: localhost:8082
 info:
   contact: {}
   description: 'Real-time monitoring for MongoDB: slow queries, index usage, COLLSCAN
@@ -480,6 +538,80 @@ paths:
       summary: Đếm số slow query entries trong system.profile trên tất cả host
       tags:
       - profile
+  /mongodb-cmd/replica-status:
+    get:
+      description: 'Gọi rs.status() để lấy thông tin tất cả member: state, health,
+        replication lag. lag_seconds=null nếu member là PRIMARY.'
+      parameters:
+      - description: MongoDB host (phải là member của replica set)
+        in: query
+        name: endpoint
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/replicaset.ReplicaSetStatus'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Lấy trạng thái Replica Set
+      tags:
+      - replication
+  /mongodb-cmd/snapshots:
+    delete:
+      description: Xóa tất cả index snapshot có captured_at < before. Nếu không truyền
+        endpoint thì xóa trên tất cả host. Dùng để tránh storage phình theo thời gian.
+      parameters:
+      - description: 'RFC3339 — xóa snapshot trước thời điểm này (ví dụ: 2025-01-01T00:00:00Z)'
+        in: query
+        name: before
+        required: true
+        type: string
+      - description: Chỉ xóa snapshot của endpoint này (bỏ trống = tất cả)
+        in: query
+        name: endpoint
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/main.DeleteSnapshotsResponse'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Xóa snapshot cũ để giải phóng storage
+      tags:
+      - snapshot
 schemes:
 - http
 - https
