@@ -32,8 +32,9 @@ func NewCollector(clients map[string]*mongo.Client, storage *Storage, intervalMi
 }
 
 // Start khởi động collector.
-// Nếu chưa có snapshot nào → collect ngay lập tức.
-// Nếu đã có rồi (service restart) → chờ đúng interval rồi mới collect.
+// - Chưa có snapshot nào → collect ngay lập tức.
+// - Có snapshot rồi, lần cuối cách đây >= interval → collect ngay lập tức.
+// - Có snapshot rồi, lần cuối cách đây < interval → chờ phần còn lại rồi mới collect.
 func (c *Collector) Start(ctx context.Context) {
 	go func() {
 		endpoints := make([]string, 0, len(c.clients))
@@ -41,17 +42,18 @@ func (c *Collector) Start(ctx context.Context) {
 			endpoints = append(endpoints, ep)
 		}
 
-		hasSnapshot, err := c.storage.HasAnySnapshot(ctx, endpoints)
-		if err != nil {
-			log.Printf("[Snapshot] Could not check existing snapshots: %v — collecting immediately\n", err)
-			hasSnapshot = false
-		}
+		firstDelay := c.calcFirstDelay(ctx, endpoints)
 
-		if !hasSnapshot {
-			log.Println("[Snapshot] No existing snapshots found, collecting immediately...")
+		if firstDelay == 0 {
 			c.collect(ctx)
 		} else {
-			log.Printf("[Snapshot] Existing snapshots found, waiting %v before next collection\n", c.interval)
+			log.Printf("[Snapshot] Next collection in %v\n", firstDelay.Round(time.Second))
+			select {
+			case <-time.After(firstDelay):
+				c.collect(ctx)
+			case <-ctx.Done():
+				return
+			}
 		}
 
 		ticker := time.NewTicker(c.interval)
@@ -65,6 +67,29 @@ func (c *Collector) Start(ctx context.Context) {
 			}
 		}
 	}()
+}
+
+// calcFirstDelay tính thời gian chờ trước lần collect đầu tiên.
+// Trả về 0 nếu cần collect ngay lập tức.
+func (c *Collector) calcFirstDelay(ctx context.Context, endpoints []string) time.Duration {
+	latestAt, err := c.storage.FindLatestCapturedAt(ctx, endpoints)
+	if err != nil {
+		// Chưa có snapshot nào (hoặc lỗi) → collect ngay
+		log.Println("[Snapshot] No existing snapshots found, collecting immediately...")
+		return 0
+	}
+
+	elapsed := time.Since(latestAt)
+	if elapsed >= c.interval {
+		log.Printf("[Snapshot] Last snapshot was %v ago (>= interval %v), collecting immediately...\n",
+			elapsed.Round(time.Second), c.interval)
+		return 0
+	}
+
+	remaining := c.interval - elapsed
+	log.Printf("[Snapshot] Last snapshot was %v ago, next collection in %v\n",
+		elapsed.Round(time.Second), remaining.Round(time.Second))
+	return remaining
 }
 
 func (c *Collector) collect(ctx context.Context) {

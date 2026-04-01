@@ -65,6 +65,20 @@ func (s *Storage) HasAnySnapshot(ctx context.Context, endpoints []string) (bool,
 	return count > 0, nil
 }
 
+// FindLatestCapturedAt trả về thời điểm captured_at của snapshot mới nhất
+// trong số các endpoints. Trả về mongo.ErrNoDocuments nếu chưa có snapshot nào.
+func (s *Storage) FindLatestCapturedAt(ctx context.Context, endpoints []string) (time.Time, error) {
+	opts := options.FindOne().SetSort(bson.D{{Key: "captured_at", Value: -1}})
+	var snap IndexSnapshot
+	err := s.db.Collection(snapshotCollection).FindOne(ctx, bson.M{
+		"endpoint": bson.M{"$in": endpoints},
+	}, opts).Decode(&snap)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return snap.CapturedAt, nil
+}
+
 // FindClosestBefore tìm snapshot gần nhất TRƯỚC hoặc TẠI thời điểm t
 func (s *Storage) FindClosestBefore(ctx context.Context, endpoint, database, collection string, t time.Time) (*IndexSnapshot, error) {
 	filter := bson.M{
