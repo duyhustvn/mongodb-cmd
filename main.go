@@ -279,6 +279,16 @@ func (inst *handler) GetProfile(c *gin.Context) {
 		offset = *query.Offset
 	}
 
+	sortField := "ts"
+	if query.OrderBy != "" {
+		sortField = query.OrderBy
+	}
+
+	sortDirection := -1
+	if query.OrderType == "asc" {
+		sortDirection = 1
+	}
+
 	isUnique := false
 	if query.Unique != nil && *query.Unique {
 		isUnique = true
@@ -288,6 +298,10 @@ func (inst *handler) GetProfile(c *gin.Context) {
 		// Dùng bson.D cho các operations yêu cầu tính thứ tự (như Pipeline)
 		pipeline := mongo.Pipeline{
 			{{Key: "$match", Value: filter}},
+			// sort trước khi group
+			{{Key: "$sort", Value: bson.D{{Key: sortField, Value: sortDirection}}}},
+			// limit số lượng bản ghi trước khi group
+			{{Key: "$limit", Value: limit}},
 			{{Key: "$group", Value: bson.D{
 				{Key: "_id", Value: "$queryHash"},
 				{Key: "count", Value: bson.D{{Key: "$sum", Value: 1}}},
@@ -298,7 +312,7 @@ func (inst *handler) GetProfile(c *gin.Context) {
 			}}},
 			{{Key: "$sort", Value: bson.D{{Key: "count", Value: -1}}}}, // Xếp theo query xuất hiện nhiều nhất
 			{{Key: "$skip", Value: offset}},
-			{{Key: "$limit", Value: limit}},
+			{{Key: "$limit", Value: 5}}, // mặc định limit là 5
 		}
 
 		cursor, err := col.Aggregate(ctx, pipeline)
@@ -319,16 +333,6 @@ func (inst *handler) GetProfile(c *gin.Context) {
 		c.JSON(http.StatusOK, results)
 
 	} else {
-		sortField := "ts"
-		if query.OrderBy != "" {
-			sortField = query.OrderBy
-		}
-
-		sortDirection := -1
-		if query.OrderType == "asc" {
-			sortDirection = 1
-		}
-
 		findOptions := options.Find().
 			SetSort(bson.D{{Key: sortField, Value: sortDirection}}).
 			SetLimit(limit).
