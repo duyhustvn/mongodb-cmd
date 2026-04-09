@@ -196,9 +196,10 @@ type GetDatabaseProfileQuery struct {
 	Duration     *int64 `form:"duration"`
 	OrderBy      string `form:"order_by"`
 	OrderType    string `form:"order_type"` // "asc" hoặc "desc"
-	Unique       *bool  `form:"unique"`
+	Statistic    *bool  `form:"statistic"`
 	From         string `form:"from"`
 	To           string `form:"to"`
+	QueryHash    string `form:"query_hash"`
 	IgnoreHashes string `form:"ignore_hashes"`
 }
 
@@ -215,9 +216,10 @@ type GetDatabaseProfileQuery struct {
 // @Param       offset         query  integer false  "Bỏ qua N kết quả đầu (phân trang)"
 // @Param       order_by       query  string  false  "Field sắp xếp (mặc định: ts)"
 // @Param       order_type     query  string  false  "asc hoặc desc (mặc định: desc)"
-// @Param       unique         query  boolean false  "Gom nhóm theo queryHash, trả về thống kê"
+// @Param       statistic      query  boolean false  "Gom nhóm theo queryHash, trả về thống kê"
 // @Param       from           query  string  false  "RFC3339 — lấy từ thời điểm này (ví dụ: 2025-01-01T00:00:00Z)"
 // @Param       to             query  string  false  "RFC3339 — lấy đến thời điểm này"
+// @Param       query_hash     query  string  false  "Lọc theo queryHash"
 // @Param       ignore_hashes  query  string  false  "Bỏ qua những bản ghi có queryHash trong danh sách"
 // @Success     200  {array}   map[string]interface{}
 // @Failure     400  {object}  map[string]string
@@ -304,12 +306,16 @@ func (inst *handler) GetProfile(c *gin.Context) {
 		sortDirection = 1
 	}
 
-	isUnique := false
-	if query.Unique != nil && *query.Unique {
-		isUnique = true
+	enableStatistic := false
+	if query.Statistic != nil && *query.Statistic {
+		enableStatistic = true
 	}
 
-	if isUnique {
+	if query.QueryHash != "" {
+		filter["queryHash"] = query.QueryHash
+	}
+
+	if enableStatistic {
 		// Dùng bson.D cho các operations yêu cầu tính thứ tự (như Pipeline)
 		pipeline := mongo.Pipeline{
 			{{Key: "$match", Value: filter}},
