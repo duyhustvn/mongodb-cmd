@@ -285,7 +285,7 @@ func (inst *handler) GetProfile(c *gin.Context) {
 		filter["ts"] = tsFilter
 	}
 
-	limit := int64(20)
+	limit := int64(10000)
 	if query.Limit != nil {
 		limit = *query.Limit
 	}
