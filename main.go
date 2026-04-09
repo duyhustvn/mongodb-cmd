@@ -188,17 +188,18 @@ func (inst *handler) GetProfiles(c *gin.Context) {
 }
 
 type GetDatabaseProfileQuery struct {
-	Endpoint   string `form:"endpoint" binding:"required"`
-	Database   string `form:"database" binding:"required"`
-	Limit      *int64 `form:"limit"`
-	Offset     *int64 `form:"offset"`
-	Collection string `form:"collection"`
-	Duration   *int64 `form:"duration"`
-	OrderBy    string `form:"order_by"`
-	OrderType  string `form:"order_type"` // "asc" hoặc "desc"
-	Unique     *bool  `form:"unique"`
-	From       string `form:"from"`
-	To         string `form:"to"`
+	Endpoint     string `form:"endpoint" binding:"required"`
+	Database     string `form:"database" binding:"required"`
+	Limit        *int64 `form:"limit"`
+	Offset       *int64 `form:"offset"`
+	Collection   string `form:"collection"`
+	Duration     *int64 `form:"duration"`
+	OrderBy      string `form:"order_by"`
+	OrderType    string `form:"order_type"` // "asc" hoặc "desc"
+	Unique       *bool  `form:"unique"`
+	From         string `form:"from"`
+	To           string `form:"to"`
+	IgnoreHashes string `form:"ignore_hashes"`
 }
 
 // GetProfile godoc
@@ -206,17 +207,18 @@ type GetDatabaseProfileQuery struct {
 // @Description Truy vấn system.profile với nhiều tùy chọn lọc: collection, duration, thời gian, phân trang. Hỗ trợ chế độ unique để gom nhóm theo queryHash.
 // @Tags        profile
 // @Produce     json
-// @Param       endpoint    query  string  true   "MongoDB host (ví dụ: 172.17.0.1:27017)"
-// @Param       database    query  string  true   "Tên database"
-// @Param       collection  query  string  false  "Lọc theo collection"
-// @Param       duration    query  integer false  "Chỉ lấy query chậm hơn N ms"
-// @Param       limit       query  integer false  "Số kết quả tối đa (mặc định 20)"
-// @Param       offset      query  integer false  "Bỏ qua N kết quả đầu (phân trang)"
-// @Param       order_by    query  string  false  "Field sắp xếp (mặc định: ts)"
-// @Param       order_type  query  string  false  "asc hoặc desc (mặc định: desc)"
-// @Param       unique      query  boolean false  "Gom nhóm theo queryHash, trả về thống kê"
-// @Param       from        query  string  false  "RFC3339 — lấy từ thời điểm này (ví dụ: 2025-01-01T00:00:00Z)"
-// @Param       to          query  string  false  "RFC3339 — lấy đến thời điểm này"
+// @Param       endpoint       query  string  true   "MongoDB host (ví dụ: 172.17.0.1:27017)"
+// @Param       database       query  string  true   "Tên database"
+// @Param       collection     query  string  false  "Lọc theo collection"
+// @Param       duration       query  integer false  "Chỉ lấy query chậm hơn N ms"
+// @Param       limit          query  integer false  "Số kết quả tối đa (mặc định 20)"
+// @Param       offset         query  integer false  "Bỏ qua N kết quả đầu (phân trang)"
+// @Param       order_by       query  string  false  "Field sắp xếp (mặc định: ts)"
+// @Param       order_type     query  string  false  "asc hoặc desc (mặc định: desc)"
+// @Param       unique         query  boolean false  "Gom nhóm theo queryHash, trả về thống kê"
+// @Param       from           query  string  false  "RFC3339 — lấy từ thời điểm này (ví dụ: 2025-01-01T00:00:00Z)"
+// @Param       to             query  string  false  "RFC3339 — lấy đến thời điểm này"
+// @Param       ignore_hashes  query  string  false  "Bỏ qua những bản ghi có queryHash trong danh sách"
 // @Success     200  {array}   map[string]interface{}
 // @Failure     400  {object}  map[string]string
 // @Failure     500  {object}  map[string]string
@@ -246,6 +248,19 @@ func (inst *handler) GetProfile(c *gin.Context) {
 	}
 	if query.Duration != nil {
 		filter["millis"] = bson.M{"$gt": *query.Duration}
+	}
+
+	if query.IgnoreHashes != "" {
+		var ignoreHashes []string
+
+		for _, hash := range strings.Split(query.IgnoreHashes, ",") {
+			if trimmed := strings.TrimSpace(hash); trimmed != "" {
+				ignoreHashes = append(ignoreHashes, trimmed)
+			}
+			if len(ignoreHashes) > 0 {
+				filter["queryHash"] = bson.M{"$nin": ignoreHashes}
+			}
+		}
 	}
 
 	// Lọc theo thời gian trên field "ts" của system.profile
