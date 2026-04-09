@@ -201,6 +201,7 @@ type GetDatabaseProfileQuery struct {
 	To           string `form:"to"`
 	QueryHash    string `form:"query_hash"`
 	IgnoreHashes string `form:"ignore_hashes"`
+	IgnoreApps   string `form:"ignore_apps"`
 }
 
 // GetProfile godoc
@@ -221,6 +222,7 @@ type GetDatabaseProfileQuery struct {
 // @Param       to             query  string  false  "RFC3339 — lấy đến thời điểm này"
 // @Param       query_hash     query  string  false  "Lọc theo queryHash"
 // @Param       ignore_hashes  query  string  false  "Bỏ qua những bản ghi có queryHash trong danh sách"
+// @Param       ignore_apps    query  string  false  "Bỏ qua những app có trong danh sách"
 // @Success     200  {array}   map[string]interface{}
 // @Failure     400  {object}  map[string]string
 // @Failure     500  {object}  map[string]string
@@ -262,6 +264,19 @@ func (inst *handler) GetProfile(c *gin.Context) {
 			if len(ignoreHashes) > 0 {
 				filter["queryHash"] = bson.M{"$nin": ignoreHashes}
 			}
+		}
+	}
+
+	if query.IgnoreApps != "" {
+		var ignoredApps []string
+		for _, app := range strings.Split(query.IgnoreApps, ",") {
+			trimmed := strings.TrimSpace(app)
+			if trimmed != "" {
+				ignoredApps = append(ignoredApps, trimmed)
+			}
+		}
+		if len(ignoredApps) > 0 {
+			filter["appName"] = bson.M{"$nin": ignoredApps}
 		}
 	}
 
