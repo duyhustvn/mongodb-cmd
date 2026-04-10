@@ -222,7 +222,7 @@ type GetDatabaseProfileQuery struct {
 // @Param       to             query  string  false  "RFC3339 — lấy đến thời điểm này"
 // @Param       query_hash     query  string  false  "Lọc theo queryHash"
 // @Param       ignore_hashes  query  string  false  "Bỏ qua những bản ghi có queryHash trong danh sách"
-// @Param       ignore_apps    query  string  false  "Bỏ qua những app có trong danh sách"
+// @Param       ignore_apps    query  string  false  "Bỏ qua những app có trong danh sách ví dụ: mongodb_exporter"
 // @Success     200  {array}   map[string]interface{}
 // @Failure     400  {object}  map[string]string
 // @Failure     500  {object}  map[string]string
@@ -553,12 +553,13 @@ func (inst *handler) DeleteSnapshots(c *gin.Context) {
 // ─── Part 5: COLLSCAN Stats ───────────────────────────────────────────────────
 
 type CollscanStatsQuery struct {
-	Endpoint   string `form:"endpoint" binding:"required"`
-	Database   string `form:"database" binding:"required"`
-	Collection string `form:"collection"`
-	From       string `form:"from"`
-	To         string `form:"to"`
-	Limit      *int64 `form:"limit"`
+	Endpoint     string   `form:"endpoint" binding:"required"`
+	Database     string   `form:"database" binding:"required"`
+	Collection   string   `form:"collection"`
+	From         string   `form:"from"`
+	To           string   `form:"to"`
+	Limit        *int64   `form:"limit"`
+	IgnoreHashes []string `form:"ignore_hashes"`
 }
 
 // GetCollscanStats godoc
@@ -566,12 +567,13 @@ type CollscanStatsQuery struct {
 // @Description Trả về danh sách collection bị collection scan (COLLSCAN) nhiều nhất trong khoảng thời gian, kèm avg/max ms và 5 sample query.
 // @Tags        analytics
 // @Produce     json
-// @Param       endpoint    query  string  true   "MongoDB host"
-// @Param       database    query  string  true   "Tên database"
-// @Param       collection  query  string  false  "Lọc theo collection"
-// @Param       from        query  string  false  "RFC3339 — mặc định 24h trước (ví dụ: 2025-01-01T00:00:00Z)"
-// @Param       to          query  string  false  "RFC3339 — mặc định now"
-// @Param       limit       query  integer false  "Số collection trả về tối đa (mặc định 20)"
+// @Param       endpoint         query  string  true   "MongoDB host"
+// @Param       database         query  string  true   "Tên database"
+// @Param       collection       query  string  false  "Lọc theo collection"
+// @Param       from             query  string  false  "RFC3339 — mặc định 24h trước (ví dụ: 2025-01-01T00:00:00Z)"
+// @Param       to               query  string  false  "RFC3339 — mặc định now"
+// @Param       limit            query  integer false  "Số collection trả về tối đa (mặc định 20)"
+// @Param       ignore_hashes    query  string  false  "Danh sách các query hash bị ignore"
 // @Success     200  {array}   map[string]interface{}
 // @Failure     400  {object}  map[string]string
 // @Failure     500  {object}  map[string]string
@@ -619,6 +621,13 @@ func (inst *handler) GetCollscanStats(c *gin.Context) {
 	}
 	if req.Collection != "" {
 		matchFilter = append(matchFilter, bson.E{Key: "ns", Value: fmt.Sprintf("%s.%s", req.Database, req.Collection)})
+	}
+
+	if len(req.IgnoreHashes) > 0 {
+		matchFilter = append(matchFilter, bson.E{
+			Key:   "queryHash",
+			Value: bson.M{"$nin": req.IgnoreHashes},
+		})
 	}
 
 	pipeline := mongo.Pipeline{
